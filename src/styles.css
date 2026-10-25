@@ -92,6 +92,11 @@ h2 { font-size: 1.1rem; display: flex; align-items: center; gap: 8px; }
 .drop canvas { display: block; width: auto; height: auto; max-width: 100%; max-height: 46vh; cursor: default; }
 @media (max-width: 860px) { .drop canvas { max-height: 36vh; } }
 .drop canvas.pickable { cursor: pointer; }
+.drop canvas.tracing { cursor: crosshair; touch-action: none; }
+.trace-bar { display: grid; gap: 8px; }
+.trace-tools { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
+.trace-tools .tool-group { display: inline-flex; gap: 6px; align-items: center; }
+.trace-tools .btn.icon { width: 32px; min-height: 32px; font-size: 1.05rem; }
 .drop-empty { text-align: center; color: var(--ink-2); padding: 24px; }
 .drop-empty svg { width: 52px; height: 52px; opacity: .6; }
 .drop-empty p { margin: 6px 0 12px; }

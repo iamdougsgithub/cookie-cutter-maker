@@ -3,6 +3,8 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { toCreasedNormals } from 'three/addons/utils/BufferGeometryUtils.js';
 import { DEFAULTS, MM_PER_IN } from './geometry.js';
 import { candidateAt, centerlineOf } from './contours.js';
+import { curvePoints, nodesFromContour } from './trace.js';
+import { createTraceEditor } from './trace-editor.js';
 import { loadOpenCV, toWorkingCanvas, detect } from './vision.js';
 import { renderShared } from './shared-markup.js';
 
@@ -19,7 +21,7 @@ import { renderShared } from './shared-markup.js';
 export function startApp(product) {
   renderShared(product.id);
 
-  const STORE = { photo: 'pcm.photo', settings: 'pcm.settings' };
+  const STORE = { photo: 'pcm.photo', settings: 'pcm.settings', trace: 'pcm.trace' };
   const store = {
     get(k) { try { return sessionStorage.getItem(k); } catch { return null; } },
     set(k, v) { try { sessionStorage.setItem(k, v); } catch { /* full or blocked: fine */ } },
@@ -31,6 +33,10 @@ export function startApp(product) {
   const els = {
     cvStatus: $('cvStatus'), drop: $('drop'), dropEmpty: $('dropEmpty'), overlay: $('overlay'),
     pickHint: $('pickHint'), photoActions: $('photoActions'),
+    traceBtn: $('traceBtn'), traceBar: $('traceBar'), traceHint: $('traceHint'), traceUsing: $('traceUsing'),
+    traceUndo: $('traceUndo'), traceDelete: $('traceDelete'), traceCorner: $('traceCorner'),
+    traceZoomIn: $('traceZoomIn'), traceZoomOut: $('traceZoomOut'), traceFit: $('traceFit'),
+    traceClear: $('traceClear'), traceDone: $('traceDone'), traceEdit: $('traceEdit'), traceAuto: $('traceAuto'),
     modeNote: $('modeNote'), edgeField: $('edgeField'),
     threshold: $('threshold'), thresholdAuto: $('thresholdAuto'), thresholdOut: $('thresholdOut'),
     smooth: $('smooth'), smoothOut: $('smoothOut'), notches: $('notches'), notchesOut: $('notchesOut'),
@@ -49,6 +55,8 @@ export function startApp(product) {
     sel: 0,            // selected candidate
     result: null,      // product.build result
     error: null,
+    // Hand-traced outline (photo pixels). source 'trace' uses it instead of detection.
+    trace: { source: 'auto', nodes: [], closed: false },
     settings: {
       mode: 'auto', edge: 'center', threshold: null, smoothness: DEFAULTS.smoothness,
       notchWidthMM: DEFAULTS.notchWidthMM, sizeMM: DEFAULTS.sizeMM,
@@ -68,6 +76,8 @@ export function startApp(product) {
     Object.assign(state.settings, saved);
   } catch { /* ignore */ }
   const saveSettings = () => store.set(STORE.settings, JSON.stringify({ ...state.settings, v: SETTINGS_VERSION }));
+  try { Object.assign(state.trace, JSON.parse(store.get(STORE.trace) || '{}')); } catch { /* ignore */ }
+  const saveTrace = () => store.set(STORE.trace, JSON.stringify(state.trace));
 
   // ------------------------------------------------------------------ helpers
 
@@ -180,7 +190,12 @@ export function startApp(product) {
     if (remember) {
       state.settings.rotationDeg = 0;
       store.set(STORE.photo, state.work.toDataURL('image/jpeg', 0.9));
+      state.trace = { source: 'auto', nodes: [], closed: false }; // a new photo needs a new trace
+      saveTrace();
     }
+    if (editor.editing) editor.stop();
+    editor.set(state.trace.nodes, state.trace.closed);
+    updateTraceUI();
     syncControls();
     await runDetect();
   }
@@ -218,23 +233,35 @@ export function startApp(product) {
     els.modeNote.textContent = state.det
       ? (s.mode === 'auto' ? `Auto: this looks like a ${mode === 'drawing' ? 'hand drawing' : 'cookie cutter'}.` : '')
       : '';
-    els.pickHint.hidden = !(state.det && state.det.candidates.length > 1);
-    els.overlay.classList.toggle('pickable', !!state.det && state.det.candidates.length > 1);
+    const multi = state.trace.source === 'auto' && !!state.det && state.det.candidates.length > 1;
+    els.pickHint.hidden = !multi;
+    els.overlay.classList.toggle('pickable', multi);
+    if (state.trace.source === 'trace') els.edgeField.hidden = true;
 
     state.result = null;
     state.error = null;
     s.sel = state.sel;
     saveSettings();
     const cand = state.det?.candidates[state.sel];
-    if (cand) {
-      const pts = mode === 'drawing' && s.edge === 'center' ? centerlineOf(cand) : cand.points;
+    const tracing = state.trace.source === 'trace';
+    if (tracing) {
+      if (state.trace.closed && state.trace.nodes.length >= 3) {
+        try {
+          state.result = product.build(curvePoints(state.trace.nodes).points, s);
+        } catch (e) {
+          state.error = e.message;
+        }
+      } else {
+        state.error = state.trace.nodes.length ? 'Close your outline: tap the first (green) point.' : 'Tap round the edge of the shape to place points.';
+      }
+    } else if (cand) {
       try {
-        state.result = product.build(pts, s);
+        state.result = product.build(autoPoints(cand), s);
       } catch (e) {
         state.error = e.message;
       }
     } else if (state.det) {
-      state.error = 'No closed shape found. Try the threshold slider, or check the photo tips above.';
+      state.error = 'No closed shape found. Try the threshold slider, tracing it by hand, or the photo tips above.';
     }
     drawOverlay();
     viewer.show(state.result);
@@ -244,6 +271,62 @@ export function startApp(product) {
     product.render?.(s, state.result);
   }
   const rebuildSoon = debounce(rebuild, 60);
+
+  /** The outline the automatic detection would use for a candidate. */
+  function autoPoints(cand) {
+    return effectiveMode() === 'drawing' && state.settings.edge === 'center' ? centerlineOf(cand) : cand.points;
+  }
+
+  // ------------------------------------------------------------------ hand tracing
+
+  const editor = createTraceEditor(els.overlay, {
+    getImage: () => state.work,
+    onChange: (nodes, closed) => {
+      state.trace.nodes = nodes; state.trace.closed = closed;
+      saveTrace(); updateTraceUI(); rebuildSoon();
+    },
+    onSelect: () => updateTraceUI(),
+  });
+
+  function startTracing() {
+    if (!state.work) return;
+    // Start from the existing trace, or from the automatic outline if there is one.
+    if (!state.trace.nodes.length) {
+      const cand = state.trace.source === 'auto' && state.det?.candidates[state.sel];
+      state.trace.nodes = cand ? nodesFromContour(autoPoints(cand)) : [];
+      state.trace.closed = state.trace.nodes.length >= 3;
+    }
+    state.trace.source = 'trace';
+    saveTrace();
+    editor.start(state.trace.nodes, state.trace.closed);
+    updateTraceUI();
+    rebuild();
+  }
+
+  function stopTracing({ useAuto = false } = {}) {
+    editor.stop();
+    if (useAuto) state.trace.source = 'auto';
+    saveTrace();
+    updateTraceUI();
+    rebuild();
+  }
+
+  function updateTraceUI() {
+    const tracing = state.trace.source === 'trace', editing = editor.editing;
+    els.traceBtn.hidden = tracing;
+    els.traceBar.hidden = !editing;
+    els.traceUsing.hidden = !tracing || editing;
+    els.overlay.classList.toggle('tracing', editing);
+    document.querySelectorAll('[data-auto-only]').forEach((n) => (n.hidden = tracing));
+    if (!editing) return;
+    const n = state.trace.nodes.length;
+    els.traceHint.innerHTML = !state.trace.closed
+      ? (n < 3 ? '<b>Tap round the edge of the shape</b> to place points.' : 'Keep going, then <b>tap the first (green) point</b> to close the outline.')
+      : 'Drag points to adjust. <b>Tap the line</b> to add a point, <b>double-tap a point</b> for a sharp corner. Pinch or scroll to zoom.';
+    els.traceUndo.disabled = !editor.canUndo();
+    els.traceDelete.disabled = editor.selected < 0;
+    els.traceCorner.disabled = editor.selected < 0;
+  }
 
   function saveBlob(blob, filename) {
     const a = document.createElement('a');
@@ -259,8 +342,10 @@ export function startApp(product) {
 
   function drawOverlay() {
     if (!state.work) return;
+    if (state.trace.source === 'trace') { editor.draw(); return; }
     const ctx = els.overlay.getContext('2d');
     const { width: w, height: h } = els.overlay;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, w, h);
     ctx.drawImage(state.work, 0, 0);
     if (!state.det) return;
@@ -442,6 +527,7 @@ export function startApp(product) {
 
     // Click to choose among candidates.
     els.overlay.addEventListener('click', (e) => {
+      if (state.trace.source === 'trace') return;
       if (!state.det || state.det.candidates.length < 2) return;
       const r = els.overlay.getBoundingClientRect();
       const x = ((e.clientX - r.left) / r.width) * els.overlay.width;
@@ -452,6 +538,18 @@ export function startApp(product) {
   }
 
   // ------------------------------------------------------------------ boot
+
+  els.traceBtn.addEventListener('click', startTracing);
+  els.traceEdit.addEventListener('click', startTracing);
+  els.traceDone.addEventListener('click', () => stopTracing());
+  els.traceAuto.addEventListener('click', () => stopTracing({ useAuto: true }));
+  els.traceUndo.addEventListener('click', () => editor.undo());
+  els.traceDelete.addEventListener('click', () => editor.deleteSelected());
+  els.traceCorner.addEventListener('click', () => editor.toggleCorner());
+  els.traceZoomIn.addEventListener('click', () => editor.zoomBy(1.5));
+  els.traceZoomOut.addEventListener('click', () => editor.zoomBy(1 / 1.5));
+  els.traceFit.addEventListener('click', () => editor.fit());
+  els.traceClear.addEventListener('click', () => editor.clear());
 
   wireControls();
   syncControls();
@@ -466,6 +564,6 @@ export function startApp(product) {
   if (savedPhoto) loadImageFrom(savedPhoto, { remember: false }).catch(() => {});
 
   // For quick manual testing from the console.
-  window.cookieApp = { state, loadImageFrom, rebuild, viewer };
+  window.cookieApp = { state, loadImageFrom, rebuild, viewer, editor };
   return { rebuild };
 }

@@ -75,7 +75,28 @@ const PHOTO_CARD = `
       <div class="photo-actions" id="photoActions" hidden>
         <label class="btn small">Replace photo<input type="file" id="fileInput2" accept="image/*" hidden></label>
         <label class="btn small mobile-only">Retake<input type="file" id="cameraInput2" accept="image/*" capture="environment" hidden></label>
+        <button class="btn small" id="traceBtn" type="button">Trace by hand</button>
       </div>
+      <div class="trace-bar" id="traceBar" hidden>
+        <p class="hint" id="traceHint"></p>
+        <div class="trace-tools">
+          <span class="tool-group">
+            <button class="btn small" id="traceUndo" type="button">Undo</button>
+            <button class="btn small" id="traceDelete" type="button" disabled>Delete point</button>
+            <button class="btn small" id="traceCorner" type="button" disabled>Corner</button>
+          </span>
+          <span class="tool-group">
+            <button class="btn small icon" id="traceZoomOut" type="button" aria-label="Zoom out">−</button>
+            <button class="btn small icon" id="traceZoomIn" type="button" aria-label="Zoom in">+</button>
+            <button class="btn small" id="traceFit" type="button">Fit</button>
+          </span>
+          <span class="tool-group">
+            <button class="btn small" id="traceClear" type="button">Start over</button>
+            <button class="btn small primary" id="traceDone" type="button">Done</button>
+          </span>
+        </div>
+      </div>
+      <p class="hint" id="traceUsing" hidden>Using your traced outline. <button class="link" id="traceEdit" type="button">Edit it</button> · <button class="link" id="traceAuto" type="button">Use the automatic outline</button></p>
       <p class="samples">No photo handy? Try a sample:
         <button class="link" data-sample="samples/cutter-ring.png">cutter</button> ·
         <button class="link" data-sample="samples/drawn-star.png">drawn star</button> ·
@@ -88,7 +109,7 @@ const PHOTO_CARD = `
     <div class="settings" id="settings">
       <h2><span class="step">2</span> Adjust</h2>
 
-      <div class="field">
+      <div class="field" data-auto-only>
         <span class="label">Shape is a</span>
         <div class="seg" role="radiogroup" aria-label="Mode">
           <label><input type="radio" name="mode" value="auto" checked><span>Auto</span></label>
@@ -106,7 +127,7 @@ const PHOTO_CARD = `
         </div>
       </div>
 
-      <div class="field">
+      <div class="field" data-auto-only>
         <div class="label-row"><label class="label" for="threshold">Threshold</label>
           <label class="check"><input type="checkbox" id="thresholdAuto" checked> Auto</label>
           <output id="thresholdOut"></output></div>

@@ -46,11 +46,30 @@ over HTTPS, which phones prefer for camera capture.
 - `src/vision.js`: OpenCV.js: threshold (brightness, or chroma for colored cutters), morphology, contours
 - `src/cutter.js`: pure: outline → cookie-cutter mesh (tapered blade + rim), validated like the blank
 - `src/text.js`: pure: font outlines → raised text solids wrapped onto the cutter's outside wall
+- `src/trace.js`: pure: hand-traced points → smooth closed outline (centripetal Catmull-Rom, corner points), and a detected outline → editable points
+- `src/trace-editor.js`: the point editor on the photo (add, drag, insert, delete, corners, undo, zoom and pan)
 - `src/app-core.js`: shared page logic (photo, overlay, settings, three.js preview, download)
 - `src/app.js`, `src/cutter-app.js`: the two pages' configs (what to build, filename, extra settings)
 - `src/shared-markup.js`: help panel, photo card and outline settings, used by both pages
-- `test/geometry.test.js`, `test/cutter.test.js`: unit tests (node:test)
+- `test/geometry.test.js`, `test/cutter.test.js`, `test/trace.test.js`: unit tests (node:test)
 - `tools/make-test-images.mjs`: regenerates `samples/*.png`
+
+## Tracing by hand
+
+When the automatic outline isn't right, "Trace by hand" lets you place points round the
+shape instead. It starts from the detected outline, turned into about 28 editable points
+with corners where it bends sharply, or from nothing if detection found nothing.
+
+- **Place:** tap to add points, then tap the first (green) point to close the outline.
+- **Adjust:** drag a point to move it; tap or drag the line to insert a point.
+- **Corners:** double-tap a point (or use Corner) to make it sharp. Two corners in a row
+  give a straight edge.
+- **Remove and undo:** Delete point removes the selected point; Undo (or Cmd/Ctrl+Z) steps
+  back.
+- **Zoom:** pinch, scroll, or the − / + / Fit buttons; drag empty space to pan.
+
+The curve passes through every point without overshooting. The traced outline replaces
+detection for both the blank and the cutter, and it's remembered when you switch pages.
 
 ## Blank geometry
 
