@@ -1,5 +1,5 @@
 // Markup shared by both pages (practice blank and cookie cutter): the photo tips, the
-// photo card, the outline settings and the projector drawing card. Each page supplies its own model card and the
+// photo card and the outline settings. Each page supplies its own model card and the
 // settings specific to what it makes (a <template id="product-fields">).
 
 export const PAGES = [
@@ -157,35 +157,6 @@ const PHOTO_CARD = `
     </div>
 `;
 
-const PROJECTOR_CARD = `
-    <div class="card-head">
-      <h2 id="proj-h"><span class="step">4</span> Projector drawing</h2>
-      <span class="status" id="projStatus"></span>
-    </div>
-    <div class="proj-body">
-      <div class="proj-preview" id="projPreview"><div class="viewer-empty">The line drawing will appear here.</div></div>
-      <div class="proj-controls">
-        <p class="note">For tracing icing with a cookie projector. Stamp details inside a cutter (or lines inside a drawing) are traced as single lines, at the cookie's size and the same way round.</p>
-        <div class="checks">
-          <label class="check"><input type="checkbox" id="projLines" checked> Stamp details</label>
-          <label class="check"><input type="checkbox" id="projOutline" checked> Cookie outline</label>
-        </div>
-        <div class="field">
-          <div class="label-row"><label class="label" for="projStroke">Line weight</label><output id="projStrokeOut"></output></div>
-          <input type="range" id="projStroke" min="0.3" max="2.5" step="0.1" value="0.8">
-        </div>
-        <div class="seg" role="radiogroup" aria-label="Colours">
-          <label><input type="radio" name="projInvert" value="0" checked><span>Black on white</span></label>
-          <label><input type="radio" name="projInvert" value="1"><span>White on black</span></label>
-        </div>
-        <div class="btn-row start">
-          <button class="btn primary" id="projSvg" disabled>Download SVG (true size)</button>
-          <button class="btn" id="projPng" disabled>PNG for projector</button>
-        </div>
-        <p class="note">The PNG is 1920 × 1080 with the drawing centred. Line the projected outline up with the cookie's edge, then trace. On dark icing, try white on black.</p>
-      </div>
-    </div>`;
-
 /** Fill the shared slots of the page. Call before looking up any elements. */
 export function renderShared(pageId) {
   document.getElementById('help').insertAdjacentHTML('beforeend', HELP);
@@ -193,12 +164,6 @@ export function renderShared(pageId) {
   card.innerHTML = PHOTO_CARD;
   const tpl = document.getElementById('product-fields');
   if (tpl) card.querySelector('#productFields').replaceWith(tpl.content.cloneNode(true));
-  const proj = document.createElement('section');
-  proj.className = 'card projector-card';
-  proj.id = 'projectorCard';
-  proj.setAttribute('aria-labelledby', 'proj-h');
-  proj.innerHTML = PROJECTOR_CARD;
-  document.querySelector('main.workspace').appendChild(proj);
   const nav = document.getElementById('pageNav');
   if (nav) {
     nav.innerHTML = PAGES.map((p) => `<a href="${p.href}"${p.id === pageId ? ' aria-current="page"' : ''}>${p.label}</a>`).join('');

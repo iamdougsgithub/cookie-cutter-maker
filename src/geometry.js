@@ -275,16 +275,8 @@ export function processOutline(pixelPts, opts = {}) {
   const g = o.sizeMM / Math.max(fb.width, fb.height);
   out = out.map(([x, y]) => [x * g, y * g]);
 
-  /** Map any pixel-space points (e.g. stamp lines) into the outline's final mm frame. */
-  const toMM = (px) => {
-    const local = px.map(([x, y]) => [(x - ox) * s, (-y - oy) * s]);
-    const t = transformPoints(local, { rotationDeg: o.rotationDeg, mirror: o.mirror });
-    if (o.mirror) t.reverse(); // transformPoints reverses to keep polygon orientation
-    return t.map(([x, y]) => [(x * f - cx) * g, (y * f - cy) * g]);
-  };
-
   const fin = bbox(out);
-  return { outline: out, overlayPx, toMM, widthMM: fin.width, heightMM: fin.height };
+  return { outline: out, overlayPx, widthMM: fin.width, heightMM: fin.height };
 }
 
 // ---------------------------------------------------------------- mesh

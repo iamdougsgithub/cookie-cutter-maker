@@ -7,10 +7,6 @@ the browser (nothing is uploaded):
 - `cutter.html`: a matching **cookie cutter**, whose blade's inside edge is exactly the
   blank's outline
 
-Both pages also export a **projector line drawing** (SVG at true size, or a 1920×1080
-PNG): the cookie outline plus any stamp details inside a cutter, or lines inside a drawing,
-traced as single centre lines.
-
 Both pages share the photo pipeline and settings; the photo and settings carry over
 between them in the same browser tab (sessionStorage).
 
@@ -48,12 +44,10 @@ over HTTPS, which phones prefer for camera capture.
 - `src/contours.js`: pure: picks the cookie edge from an OpenCV-style contour tree, centerline, auto-mode guess
 - `src/vision.js`: OpenCV.js: threshold (brightness, or chroma for colored cutters), morphology, contours
 - `src/cutter.js`: pure: outline → cookie-cutter mesh (tapered blade + rim), validated like the blank
-- `src/lines.js`: pure: binary mask → stamp/detail centre lines (thinning, tracing, spur pruning)
-- `src/projector.js`: pure: outline + detail lines (mm) → true-size SVG
 - `src/app-core.js`: shared page logic (photo, overlay, settings, three.js preview, download)
 - `src/app.js`, `src/cutter-app.js`: the two pages' configs (what to build, filename, extra settings)
 - `src/shared-markup.js`: help panel, photo card and outline settings, used by both pages
-- `test/geometry.test.js`, `test/cutter.test.js`, `test/lines.test.js`: unit tests (node:test)
+- `test/geometry.test.js`, `test/cutter.test.js`: unit tests (node:test)
 - `tools/make-test-images.mjs`: regenerates `samples/*.png`
 
 ## Blank geometry
@@ -88,13 +82,3 @@ a strip whose every triangle touches both rings. If the shorter-diagonal walk wo
 the code tries nearest-point pairing; failing that, it uses an earcut triangulation with
 diagonals flipped so it doesn't leave flat terraces. Tests check the edge width on heart,
 star and figure, and that no bevel triangle folds.
-
-## Projector drawing
-
-Detail lines come from the same binary mask the outline was found in. The app keeps the
-foreground pixels that sit well inside the cookie edge, which drops the cutter wall, then
-discards specks. Thick or compact blobs (solid dots, filled shapes) are reduced to their
-boundary so they're drawn as outlines. Zhang–Suen thinning gives 1 px centre lines, which
-are traced into polylines, short dead-end spurs pruned, then simplified and smoothed.
-`processOutline` returns a `toMM` transform, so the lines get exactly the cookie outline's
-mirror, rotation and scale.

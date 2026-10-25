@@ -5,8 +5,6 @@ import { DEFAULTS, MM_PER_IN } from './geometry.js';
 import { candidateAt, centerlineOf } from './contours.js';
 import { loadOpenCV, toWorkingCanvas, detect } from './vision.js';
 import { renderShared } from './shared-markup.js';
-import { extractStampLines } from './lines.js';
-import { projectorSVG } from './projector.js';
 
 /**
  * Shared page logic. `product` describes what this page makes:
@@ -40,8 +38,6 @@ export function startApp(product) {
     viewer: $('viewer'), viewerEmpty: $('viewerEmpty'), resetView: $('resetView'),
     dimsIn: $('dimsIn'), dimsMm: $('dimsMm'), volume: $('volume'), tris: $('tris'),
     validation: $('validation'), name: $('name'), download: $('download'), filename: $('filename'),
-    projStatus: $('projStatus'), projPreview: $('projPreview'), projLines: $('projLines'), projOutline: $('projOutline'),
-    projStroke: $('projStroke'), projStrokeOut: $('projStrokeOut'), projSvg: $('projSvg'), projPng: $('projPng'),
   };
 
   const state = {
@@ -56,10 +52,8 @@ export function startApp(product) {
       mode: 'auto', edge: 'center', threshold: null, smoothness: DEFAULTS.smoothness,
       notchWidthMM: DEFAULTS.notchWidthMM, sizeMM: DEFAULTS.sizeMM,
       units: 'in', mirror: false, rotationDeg: 0,
-      projLines: true, projOutline: true, projStrokeMM: 0.8, projInvert: false,
       ...product.defaults,
     },
-    stamp: null,       // { key, lines } detail lines in photo pixels, for the selected shape
   };
 
   // Settings carry over between the blank and cutter pages (same tab only).
@@ -241,55 +235,14 @@ export function startApp(product) {
     } else if (state.det) {
       state.error = 'No closed shape found. Try the threshold slider, or check the photo tips above.';
     }
-    updateStamp(cand);
     drawOverlay();
     viewer.show(state.result);
     els.viewerEmpty.hidden = !!state.result;
     els.viewerEmpty.textContent = state.error && state.det ? `Couldn’t build a ${product.noun} from this shape.` : `Your ${product.noun} will appear here.`;
     updateReadout();
-    renderProjector();
     product.render?.(s, state.result);
   }
   const rebuildSoon = debounce(rebuild, 60);
-
-  // Detail lines only depend on the photo and which shape is selected.
-  function updateStamp(cand) {
-    if (!cand || !state.det?.binary) { state.stamp = null; return; }
-    const key = `${state.sel}`;
-    if (state.stamp?.det === state.det && state.stamp.key === key) return;
-    const lines = extractStampLines(state.det.binary, state.det.width, state.det.height, cand.points, { lineThickness: cand.lineThickness });
-    state.stamp = { det: state.det, key, lines };
-  }
-
-  function currentDrawing() {
-    const r = state.result, s = state.settings;
-    if (!r?.toMM) return null;
-    const lines = (state.stamp?.lines ?? []).map((l) => ({ pts: r.toMM(l.pts), closed: l.closed }));
-    return projectorSVG({
-      outline: r.outline, lines, strokeMM: s.projStrokeMM, invert: s.projInvert,
-      showOutline: s.projOutline, showLines: s.projLines,
-    });
-  }
-
-  function renderProjector() {
-    const s = state.settings;
-    els.projStrokeOut.textContent = `${fmt(s.projStrokeMM, 1)} mm`;
-    const n = state.stamp?.lines.length ?? 0;
-    els.projStatus.textContent = !state.result ? '' : n ? `${n} detail line${n > 1 ? 's' : ''} found` : 'No stamp details found: outline only';
-    const d = currentDrawing();
-    els.projSvg.disabled = els.projPng.disabled = !d;
-    if (!d) { els.projPreview.innerHTML = '<div class="viewer-empty">The line drawing will appear here.</div>'; return; }
-    els.projPreview.innerHTML = d.svg;
-    const svg = els.projPreview.querySelector('svg');
-    svg.removeAttribute('width'); svg.removeAttribute('height');
-    svg.setAttribute('role', 'img');
-    svg.setAttribute('aria-label', 'Projector line drawing preview');
-  }
-
-  function projectorName(ext) {
-    const name = els.name.value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'cookie';
-    return `projector_${name}_${fmt(state.settings.sizeMM / MM_PER_IN, 3)}in.${ext}`;
-  }
 
   function saveBlob(blob, filename) {
     const a = document.createElement('a');
@@ -301,28 +254,6 @@ export function startApp(product) {
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   }
 
-  async function downloadProjectorPNG() {
-    const d = currentDrawing();
-    if (!d) return;
-    const W = 1920, H = 1080;
-    const url = URL.createObjectURL(new Blob([d.svg], { type: 'image/svg+xml' }));
-    try {
-      const img = new Image();
-      await new Promise((res, rej) => { img.onload = res; img.onerror = () => rej(new Error('Could not render the drawing.')); img.src = url; });
-      const c = document.createElement('canvas');
-      c.width = W; c.height = H;
-      const g = c.getContext('2d');
-      g.fillStyle = state.settings.projInvert ? '#000' : '#fff';
-      g.fillRect(0, 0, W, H);
-      const k = Math.min((W * 0.92) / d.widthMM, (H * 0.92) / d.heightMM);
-      const dw = d.widthMM * k, dh = d.heightMM * k;
-      g.drawImage(img, (W - dw) / 2, (H - dh) / 2, dw, dh);
-      const blob = await new Promise((res) => c.toBlob(res, 'image/png'));
-      saveBlob(blob, projectorName('png'));
-    } finally {
-      URL.revokeObjectURL(url);
-    }
-  }
   const detectSoon = debounce(() => runDetect().catch(showError), 120);
 
   function drawOverlay() {
@@ -348,14 +279,6 @@ export function startApp(product) {
       ctx.strokeStyle = 'rgba(30,140,200,.95)'; ctx.lineWidth = lw * 1.2; ctx.stroke();
       ctx.setLineDash([]);
     });
-    // Detail lines that will go into the projector drawing.
-    for (const l of state.stamp?.lines ?? []) {
-      ctx.beginPath();
-      l.pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
-      if (l.closed) ctx.closePath();
-      ctx.strokeStyle = 'rgba(255,255,255,.95)'; ctx.lineWidth = lw * 2.4; ctx.stroke();
-      ctx.strokeStyle = '#00a7c4'; ctx.lineWidth = lw * 1.2; ctx.stroke();
-    }
     // Selected: the final, rounded cookie edge with a halo.
     const sel = state.result?.overlayPx ?? state.det.candidates[state.sel]?.points;
     if (sel) {
@@ -437,10 +360,6 @@ export function startApp(product) {
     document.querySelectorAll('input[name="mode"]').forEach((r) => (r.checked = r.value === s.mode));
     document.querySelectorAll('input[name="edge"]').forEach((r) => (r.checked = r.value === s.edge));
     document.querySelectorAll('input[name="units"]').forEach((r) => (r.checked = r.value === s.units));
-    els.projLines.checked = s.projLines;
-    els.projOutline.checked = s.projOutline;
-    els.projStroke.value = s.projStrokeMM;
-    document.querySelectorAll('input[name="projInvert"]').forEach((r) => (r.checked = (r.value === '1') === s.projInvert));
     els.thresholdAuto.checked = s.threshold == null;
     els.threshold.disabled = s.threshold == null;
     if (s.threshold != null) { els.threshold.value = s.threshold; els.thresholdOut.textContent = s.threshold; }
@@ -498,13 +417,6 @@ export function startApp(product) {
     els.rotR.addEventListener('click', () => setRot(s.rotationDeg - 90));
 
     els.name.addEventListener('input', () => (els.filename.textContent = fileName()));
-    const projChanged = () => { saveSettings(); renderProjector(); };
-    els.projLines.addEventListener('change', () => { s.projLines = els.projLines.checked; projChanged(); });
-    els.projOutline.addEventListener('change', () => { s.projOutline = els.projOutline.checked; projChanged(); });
-    els.projStroke.addEventListener('input', () => { s.projStrokeMM = Number(els.projStroke.value); projChanged(); });
-    document.querySelectorAll('input[name="projInvert"]').forEach((r) => r.addEventListener('change', () => { s.projInvert = r.value === '1'; projChanged(); }));
-    els.projSvg.addEventListener('click', () => { const d = currentDrawing(); if (d) saveBlob(new Blob([d.svg], { type: 'image/svg+xml' }), projectorName('svg')); });
-    els.projPng.addEventListener('click', () => downloadProjectorPNG().catch(showError));
     els.download.addEventListener('click', download);
     els.resetView.addEventListener('click', () => viewer.fit());
 
@@ -551,5 +463,5 @@ export function startApp(product) {
   if (savedPhoto) loadImageFrom(savedPhoto, { remember: false }).catch(() => {});
 
   // For quick manual testing from the console.
-  window.cookieApp = { state, loadImageFrom, rebuild, currentDrawing, viewer };
+  window.cookieApp = { state, loadImageFrom, rebuild, viewer };
 }

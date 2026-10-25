@@ -44,7 +44,7 @@ export function toWorkingCanvas(img) {
 /**
  * Find cookie-edge candidates in a working canvas.
  * opts: { mode: 'auto'|'cutter'|'drawing', threshold: null (Otsu) | 0..255 }
- * Returns { candidates, binary (w*h mask, foreground 255), thresholdUsed, channel, foregroundIsDark, detectedMode, width, height }.
+ * Returns { candidates, thresholdUsed, channel, foregroundIsDark, detectedMode, width, height }.
  */
 export function detect(cv, canvas, { mode = 'auto', threshold = null } = {}) {
   const width = canvas.width, height = canvas.height;
@@ -89,14 +89,12 @@ export function detect(cv, canvas, { mode = 'auto', threshold = null } = {}) {
     const kOpen = M(cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(3, 3)));
     const bin = M(new cv.Mat());
     let candidates = null;
-    let binary = null; // gentlest cleaned mask: stamp details are read from this
     for (const frac of closeFracs) {
       raw.copyTo(bin);
       const closeK = oddAtLeast3(Math.round(dim * frac));
       const kClose = M(cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(closeK, closeK)));
       cv.morphologyEx(bin, bin, cv.MORPH_CLOSE, kClose);
       cv.morphologyEx(bin, bin, cv.MORPH_OPEN, kOpen);
-      if (!binary) binary = Uint8Array.from(bin.data);
       const found = findContoursIn(cv, bin, width, height);
       if (!candidates) candidates = found; // no ring anywhere -> keep the gentlest result
       if (found.some((c) => c.kind === 'inner')) { candidates = found; break; }
@@ -104,7 +102,7 @@ export function detect(cv, canvas, { mode = 'auto', threshold = null } = {}) {
 
     const detectedMode = guessMode({ candidate: candidates[0], foregroundIsDark, colored: useColor });
 
-    return { candidates, binary, thresholdUsed: Math.round(t), otsu: Math.round(otsu), channel: useColor ? 'color' : 'brightness', foregroundIsDark, detectedMode, width, height };
+    return { candidates, thresholdUsed: Math.round(t), otsu: Math.round(otsu), channel: useColor ? 'color' : 'brightness', foregroundIsDark, detectedMode, width, height };
   } finally {
     for (const m of mats) m.delete();
   }

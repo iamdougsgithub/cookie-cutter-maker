@@ -152,16 +152,6 @@ input[type="range"]:disabled { opacity: .4; }
 #bladeProfile text { font: 600 8.5px system-ui, sans-serif; fill: var(--ink-2); }
 #bladeProfile .dim { stroke: var(--ink-2); stroke-width: .7; fill: none; }
 
-/* ---- projector drawing */
-.projector-card { grid-column: 1 / -1; padding: 16px; }
-.proj-body { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 16px; align-items: start; }
-@media (max-width: 860px) { .proj-body { grid-template-columns: minmax(0, 1fr); } }
-.proj-preview { position: relative; min-height: 220px; border-radius: 12px; overflow: hidden; background: var(--viewer); display: grid; place-items: center; padding: 12px; }
-.proj-preview svg { display: block; width: 100%; height: auto; max-height: 460px; border-radius: 6px; box-shadow: 0 1px 4px rgba(0,0,0,.15); }
-.proj-controls { display: grid; gap: 12px; align-content: start; }
-.checks { display: flex; gap: 18px; flex-wrap: wrap; }
-.btn-row.start { justify-content: flex-start; }
-
 /* ---- viewer */
 .viewer { position: relative; aspect-ratio: 4 / 3; border-radius: 12px; overflow: hidden; background: var(--viewer); touch-action: none; }
 .viewer canvas { display: block; width: 100% !important; height: 100% !important; }
