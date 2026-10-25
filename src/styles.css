@@ -81,8 +81,16 @@ h2 { font-size: 1.1rem; display: flex; align-items: center; gap: 8px; }
 /* ---- drop zone */
 .drop { position: relative; border: 2px dashed var(--line); border-radius: 12px; min-height: 260px; display: grid; place-items: center; overflow: hidden; background: var(--bg); transition: border-color .15s, background .15s; }
 .drop.over { border-color: var(--accent); background: var(--accent-soft); }
-.drop.has-image { border-style: solid; min-height: 0; display: block; }
-.drop canvas { display: block; width: 100%; height: auto; max-height: 70vh; object-fit: contain; cursor: default; }
+.drop.has-image {
+  /* Stays in view while you scroll through the settings below it, so the outline can be
+     watched while adjusting. */
+  border-style: solid; min-height: 0; display: grid; place-items: center;
+  position: sticky; top: 8px; z-index: 5; background: var(--card);
+  box-shadow: 0 8px 18px -12px rgba(0, 0, 0, .45);
+}
+/* Sized by the photo's own proportions (no letterboxing), so taps map straight onto it. */
+.drop canvas { display: block; width: auto; height: auto; max-width: 100%; max-height: 46vh; cursor: default; }
+@media (max-width: 860px) { .drop canvas { max-height: 36vh; } }
 .drop canvas.pickable { cursor: pointer; }
 .drop-empty { text-align: center; color: var(--ink-2); padding: 24px; }
 .drop-empty svg { width: 52px; height: 52px; opacity: .6; }
