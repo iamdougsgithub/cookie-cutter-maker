@@ -1,0 +1,15 @@
+{
+  "name": "practice-cookie-maker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "serve": "python3 tools/serve.py 5173",
+    "samples": "node tools/make-test-images.mjs"
+  },
+  "devDependencies": {
+    "clipper-lib": "6.4.2",
+    "earcut": "3.0.1"
+  }
+}

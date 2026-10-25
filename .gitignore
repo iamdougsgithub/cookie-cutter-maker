@@ -1,0 +1,6 @@
+# Dependencies (only needed to run the tests; the site loads libraries from a CDN)
+node_modules/
+
+# Local tooling
+.claude/
+.DS_Store

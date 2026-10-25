@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cookie Cutter and Practice Blank Maker</title>
+<meta name="description" content="Turn a photo of a cookie cutter or a drawn shape into a 3D-printable cookie cutter that matches your practice blank. Runs entirely in your browser.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='44' fill='%23e7c9a0' stroke='%23b07a45' stroke-width='6'/%3E%3Ccircle cx='35' cy='40' r='6' fill='%23f2a7b8'/%3E%3Ccircle cx='62' cy='34' r='5' fill='%2392c9c3'/%3E%3Ccircle cx='58' cy='64' r='7' fill='%23f2a7b8'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="src/styles.css">
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/",
+    "earcut": "https://cdn.jsdelivr.net/npm/earcut@3.0.1/+esm",
+    "clipper-lib": "https://cdn.jsdelivr.net/npm/clipper-lib@6.4.2/+esm"
+  }
+}
+</script>
+</head>
+<body>
+
+<!-- Shared shapes for the help illustrations -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="heart" viewBox="0 0 100 100">
+      <path d="M50 88C20 66 8 48 8 32 8 19 18 10 30 10c9 0 16 5 20 13 4-8 11-13 20-13 12 0 22 9 22 22 0 16-12 34-42 56Z"/>
+    </symbol>
+    <pattern id="speckle" width="8" height="8" patternUnits="userSpaceOnUse">
+      <rect width="8" height="8" fill="#c9c2b8"/><circle cx="2" cy="2" r="1.4" fill="#a59d92"/><circle cx="6" cy="6" r="1.1" fill="#d9d3ca"/>
+    </pattern>
+    <filter id="blurShadow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="3"/></filter>
+  </defs>
+</svg>
+
+<header class="top">
+  <div class="brand">
+    <svg class="logo" viewBox="0 0 100 100" aria-hidden="true">
+      <use href="#heart" x="6" y="8" width="88" height="88" fill="#f6efe1" stroke="#c4875a" stroke-width="5"/>
+      <path d="M30 40c6-8 14-8 20 0s14 8 20 0" fill="none" stroke="#e86f8f" stroke-width="5" stroke-linecap="round"/>
+    </svg>
+    <div>
+      <h1>Cookie Cutter and Practice Blank Maker</h1>
+      <p class="tagline">Photo of a cutter or a drawing → a 3D-printable cookie cutter that matches your practice blank. Everything stays on your device.</p>
+    </div>
+  </div>
+  <nav class="page-nav" id="pageNav" aria-label="What to make"></nav>
+</header>
+
+<details class="help card" id="help">
+  <summary><span>How to take a good photo</span><span class="chev" aria-hidden="true"></span></summary>
+</details>
+
+<template id="product-fields">
+  <div class="field dims">
+    <div>
+      <label class="label" for="height">Cutter height</label>
+      <div class="num"><input type="number" id="height" data-dim="heightMM" data-min="8" data-max="40" inputmode="decimal"><span class="unit-label"></span></div>
+    </div>
+    <div>
+      <label class="label" for="rimWidth">Rim width</label>
+      <div class="num"><input type="number" id="rimWidth" data-dim="rimWidthMM" data-min="1" data-max="12" inputmode="decimal"><span class="unit-label"></span></div>
+    </div>
+    <div>
+      <label class="label" for="tip">Cutting edge</label>
+      <div class="num"><input type="number" id="tip" data-dim="tipMM" data-min="0.4" data-max="2" data-fixed-mm inputmode="decimal"><span class="unit-label"></span></div>
+    </div>
+    <div>
+      <label class="label" for="bevel">Bevel height</label>
+      <div class="num"><input type="number" id="bevel" data-dim="bevelMM" data-min="0" data-max="8" data-fixed-mm inputmode="decimal"><span class="unit-label"></span></div>
+    </div>
+    <div>
+      <label class="label" for="base">Blade thickness</label>
+      <div class="num"><input type="number" id="base" data-dim="baseMM" data-min="0.4" data-max="4" data-fixed-mm inputmode="decimal"><span class="unit-label"></span></div>
+    </div>
+  </div>
+  <div class="blade-profile">
+    <svg id="bladeProfile" viewBox="0 0 220 132" role="img" aria-label="Cross-section of the cutter blade"></svg>
+    <p class="note">The inside face is straight and exactly the cookie outline, so it cuts cookies the same size as your practice blank. The outside bevels to a thin cutting edge. Size is the cookie's longest side.</p>
+  </div>
+</template>
+
+<main class="workspace">
+  <section class="card photo-card" id="photoCard" aria-labelledby="photo-h"></section>
+
+  <section class="card model-card" aria-labelledby="model-h">
+    <div class="card-head">
+      <h2 id="model-h"><span class="step">3</span> Your cutter <span class="sub-h">as printed</span></h2>
+      <button class="btn small" id="resetView">Reset view</button>
+    </div>
+    <div class="viewer" id="viewer">
+      <div class="viewer-empty" id="viewerEmpty">Your cutter will appear here.</div>
+    </div>
+    <dl class="readout">
+      <div><dt>Overall (W × D × H)</dt><dd id="dimsIn">—</dd><dd class="sub" id="dimsMm"></dd></div>
+      <div><dt>Volume</dt><dd id="volume">—</dd><dd class="sub" id="tris"></dd></div>
+    </dl>
+    <div class="validation" id="validation" hidden></div>
+
+    <div class="download">
+      <label class="label" for="name">Name</label>
+      <div class="dl-row">
+        <input type="text" id="name" placeholder="e.g. heart" autocomplete="off" maxlength="40">
+        <button class="btn primary big" id="download" disabled>Download STL</button>
+      </div>
+      <p class="filename" id="filename"></p>
+    </div>
+
+    <div class="print-tips">
+      <h3>Printing tips</h3>
+      <ul>
+        <li>Print <b>rim down, blade up, no supports</b>. It's modelled that way (and mirrored to match), so flip it over to cut.</li>
+        <li>0.2 mm layers or finer. The 0.4 mm edge is a single wall with a 0.4 mm nozzle: turn on <b>thin-wall detection</b> ("Detect thin walls" / "Print thin walls") so the slicer keeps it.</li>
+        <li><b>PETG</b> stays stiffer in warm hands; <b>PLA</b> is fine for cool dough. Hand-wash only — dishwashers warp both.</li>
+        <li class="warn"><b>Not certified food safe</b>: layer lines can trap dough. Use a food-safe filament, chill the dough, and wash it right after use.</li>
+      </ul>
+    </div>
+  </section>
+</main>
+
+<footer class="foot">Runs entirely in your browser — your photo never leaves this device.</footer>
+
+<script type="module" src="src/cutter-app.js"></script>
+</body>
+</html>
