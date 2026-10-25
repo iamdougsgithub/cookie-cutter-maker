@@ -27,6 +27,7 @@ export function startApp(product) {
 
   const $ = (id) => document.getElementById(id);
   const dimInputs = [...document.querySelectorAll('[data-dim]')];
+  const textInputs = [...document.querySelectorAll('[data-text]')];
   const els = {
     cvStatus: $('cvStatus'), drop: $('drop'), dropEmpty: $('dropEmpty'), overlay: $('overlay'),
     pickHint: $('pickHint'), photoActions: $('photoActions'),
@@ -57,9 +58,9 @@ export function startApp(product) {
   };
 
   // Settings carry over between the blank and cutter pages (same tab only).
-  // Bump when product defaults change meaning (v3: chisel-edge cutter), so stale
+  // Bump when product defaults change meaning (v4: cutter lip and side text), so stale
   // product dimensions aren't restored; outline settings always carry over.
-  const SETTINGS_VERSION = 3;
+  const SETTINGS_VERSION = 4;
   try {
     const saved = JSON.parse(store.get(STORE.settings) || '{}');
     if (saved.v !== SETTINGS_VERSION) for (const k of Object.keys(product.defaults)) delete saved[k];
@@ -355,6 +356,7 @@ export function startApp(product) {
       inp.step = mmOnly ? '0.1' : (s.units === 'in' ? '0.05' : '0.5');
     }
     document.querySelectorAll('.unit-label').forEach((n) => (n.textContent = n.closest('.num')?.querySelector('[data-fixed-mm]') ? 'mm' : s.units));
+    for (const inp of textInputs) inp.value = s[inp.dataset.text] ?? '';
     els.mirror.checked = s.mirror;
     els.smooth.value = s.smoothness;
     document.querySelectorAll('input[name="mode"]').forEach((r) => (r.checked = r.value === s.mode));
@@ -416,6 +418,7 @@ export function startApp(product) {
     els.rotL.addEventListener('click', () => setRot(s.rotationDeg + 90));
     els.rotR.addEventListener('click', () => setRot(s.rotationDeg - 90));
 
+    for (const inp of textInputs) inp.addEventListener('input', () => { s[inp.dataset.text] = inp.value; rebuildSoon(); });
     els.name.addEventListener('input', () => (els.filename.textContent = fileName()));
     els.download.addEventListener('click', download);
     els.resetView.addEventListener('click', () => viewer.fit());
@@ -464,4 +467,5 @@ export function startApp(product) {
 
   // For quick manual testing from the console.
   window.cookieApp = { state, loadImageFrom, rebuild, viewer };
+  return { rebuild };
 }

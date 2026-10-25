@@ -17,7 +17,8 @@ ES modules need to be served over HTTP (opening `index.html` from disk won't wor
     npm run serve      # http://localhost:5173 (no-cache static server)
 
 Libraries load from jsDelivr at pinned versions: OpenCV.js 4.10.0, three.js 0.170.0,
-earcut 3.0.1, clipper-lib 6.4.2.
+earcut 3.0.1, clipper-lib 6.4.2, opentype.js 1.3.4. The side-text font, Nunito ExtraBold,
+is in `fonts/` under the SIL Open Font License (`fonts/OFL.txt`).
 
 ## Deploy (free static hosting)
 
@@ -30,7 +31,7 @@ GitHub Pages to serve them untouched.
 - **Cloudflare Pages / Netlify:** connect the repository (or drag the folder in) with no
   build command and the repository root as the output directory.
 
-Only `index.html`, `cutter.html`, `src/` and `samples/` are needed at runtime. Hosts serve
+Only `index.html`, `cutter.html`, `src/`, `fonts/` and `samples/` are needed at runtime. Hosts serve
 over HTTPS, which phones prefer for camera capture.
 
 ## Test
@@ -44,6 +45,7 @@ over HTTPS, which phones prefer for camera capture.
 - `src/contours.js`: pure: picks the cookie edge from an OpenCV-style contour tree, centerline, auto-mode guess
 - `src/vision.js`: OpenCV.js: threshold (brightness, or chroma for colored cutters), morphology, contours
 - `src/cutter.js`: pure: outline → cookie-cutter mesh (tapered blade + rim), validated like the blank
+- `src/text.js`: pure: font outlines → raised text solids wrapped onto the cutter's outside wall
 - `src/app-core.js`: shared page logic (photo, overlay, settings, three.js preview, download)
 - `src/app.js`, `src/cutter-app.js`: the two pages' configs (what to build, filename, extra settings)
 - `src/shared-markup.js`: help panel, photo card and outline settings, used by both pages
@@ -70,10 +72,18 @@ strict mode, which rounds every corner to at least 3 mm but drops parts thinner 
 
 ## Cutter geometry
 
-Modelled as printed: rim on the bed, blade up, and mirrored so that, flipped over, it cuts
+Modelled as printed: lip on the bed, blade up, and mirrored so that, flipped over, it cuts
 the shape the right way round. Defaults: 18 mm tall overall, a 1.6 mm blade that bevels
-(about 26°) over its top 2.5 mm to a 0.4 mm cutting edge, on a 2 mm thick rim that extends
-4 mm beyond the blade. The inside face is vertical and is exactly the cookie outline.
+(about 26°) over its top 2.5 mm to a 0.4 mm cutting edge, on a 3 mm thick lip that extends
+6 mm beyond the blade. The lip has a 1.5 mm round-over on its outer top edge (the edge you
+press on) and a 0.6 mm chamfer at the bed. The inside face is vertical and is exactly the
+cookie outline.
+
+Optional raised side text (default "Dispose of after use") sits on the outside face just
+above the lip. The letters are 0.6 mm proud, wrap round gentle curves, and go on the
+straightest stretch of wall with no bend tighter than 8 mm radius. They start at 4 mm cap
+height and shrink to 2.5 mm if needed; if nothing fits, the text is left off with a note.
+Each letter is its own closed solid sunk 0.4 mm into the wall, and slicers merge them.
 
 Every outside ring is an exact Clipper offset of the outline, so the edge is 0.4 mm
 everywhere, including tight inside corners, and walls that meet across a narrow gap merge.

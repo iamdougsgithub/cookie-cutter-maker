@@ -13,7 +13,8 @@
     "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
     "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/",
     "earcut": "https://cdn.jsdelivr.net/npm/earcut@3.0.1/+esm",
-    "clipper-lib": "https://cdn.jsdelivr.net/npm/clipper-lib@6.4.2/+esm"
+    "clipper-lib": "https://cdn.jsdelivr.net/npm/clipper-lib@6.4.2/+esm",
+    "opentype.js": "https://cdn.jsdelivr.net/npm/opentype.js@1.3.4/dist/opentype.module.js"
   }
 }
 </script>
@@ -58,8 +59,8 @@
       <div class="num"><input type="number" id="height" data-dim="heightMM" data-min="8" data-max="40" inputmode="decimal"><span class="unit-label"></span></div>
     </div>
     <div>
-      <label class="label" for="rimWidth">Rim width</label>
-      <div class="num"><input type="number" id="rimWidth" data-dim="rimWidthMM" data-min="1" data-max="12" inputmode="decimal"><span class="unit-label"></span></div>
+      <label class="label" for="rimWidth">Lip width</label>
+      <div class="num"><input type="number" id="rimWidth" data-dim="rimWidthMM" data-min="2" data-max="12" inputmode="decimal"><span class="unit-label"></span></div>
     </div>
     <div>
       <label class="label" for="tip">Cutting edge</label>
@@ -73,6 +74,11 @@
       <label class="label" for="base">Blade thickness</label>
       <div class="num"><input type="number" id="base" data-dim="baseMM" data-min="0.4" data-max="4" data-fixed-mm inputmode="decimal"><span class="unit-label"></span></div>
     </div>
+  </div>
+  <div class="field">
+    <label class="label" for="labelText">Side text</label>
+    <input type="text" class="text-input" id="labelText" data-text="labelText" maxlength="40" autocomplete="off" placeholder="Leave empty for none">
+    <p class="note" id="labelNote">Raised letters on the outside of the blade, just above the lip.</p>
   </div>
   <div class="blade-profile">
     <svg id="bladeProfile" viewBox="0 0 220 132" role="img" aria-label="Cross-section of the cutter blade"></svg>
@@ -109,8 +115,9 @@
     <div class="print-tips">
       <h3>Printing tips</h3>
       <ul>
-        <li>Print <b>rim down, blade up, no supports</b>. It's modelled that way (and mirrored to match), so flip it over to cut.</li>
+        <li>Print <b>lip down, blade up, no supports</b>. It's modelled that way (and mirrored to match), so flip it over to cut.</li>
         <li>0.2 mm layers or finer. The 0.4 mm edge is a single wall with a 0.4 mm nozzle: turn on <b>thin-wall detection</b> ("Detect thin walls" / "Print thin walls") so the slicer keeps it.</li>
+        <li>The side text is separate raised letters that overlap the blade; slicers (Prusa, Bambu, Orca, Cura) merge them automatically.</li>
         <li><b>PETG</b> stays stiffer in warm hands; <b>PLA</b> is fine for cool dough. Hand-wash only — dishwashers warp both.</li>
         <li class="warn"><b>Not certified food safe</b>: layer lines can trap dough. Use a food-safe filament, chill the dough, and wash it right after use.</li>
       </ul>

@@ -1,7 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeCutter, buildCutterMesh, CUTTER_DEFAULTS } from '../src/cutter.js';
-import { processOutline, parseSTL, triangulateRegion } from '../src/geometry.js';
+import { processOutline, parseSTL, triangulateRegion, bbox } from '../src/geometry.js';
+import { textShapes, labelShells } from '../src/text.js';
+import { readFileSync } from 'node:fs';
+import opentype from 'opentype.js';
+
+const fontBytes = readFileSync(new URL('../fonts/Nunito-ExtraBold.woff', import.meta.url));
+const FONT = opentype.parse(fontBytes.buffer.slice(fontBytes.byteOffset, fontBytes.byteOffset + fontBytes.length));
 import { figurePoints } from '../tools/figure-path.js';
 
 const C = 500;
@@ -135,4 +141,69 @@ test('region triangulation with a hole uses every vertex', () => {
   const all = [...outer, ...hole];
   for (const [a, b, c] of tris) area += ((all[b][0] - all[a][0]) * (all[c][1] - all[a][1]) - (all[c][0] - all[a][0]) * (all[b][1] - all[a][1])) / 2;
   assert.ok(Math.abs(area - 84) < 1e-9, `area ${area}`);
+});
+
+// ---- lip
+
+test('lip: wide, rounded top edge, chamfered bed edge', () => {
+  const res = makeCutter(SHAPES.circle, {});
+  const { rimWidthMM, rimThicknessMM, lipRadiusMM, lipChamferMM, baseMM } = res.mesh.profile;
+  assert.equal(rimWidthMM, 6); assert.equal(rimThicknessMM, 3); assert.equal(lipRadiusMM, 1.5); assert.equal(lipChamferMM, 0.6);
+  const lip = res.mesh.lip;
+  const width = (ring) => bbox(ring).width;
+  const full = 88.9 + 2 * (baseMM + rimWidthMM);
+  assert.ok(Math.abs(width(lip[0].ring) - (full - 2 * lipChamferMM)) < 0.1, 'bed ring is inset by the chamfer');
+  assert.equal(lip[0].z, 0);
+  assert.ok(Math.abs(width(lip.at(-1).ring) - (full - 2 * lipRadiusMM)) < 0.1, 'top ring is inset by the round-over');
+  assert.equal(lip.at(-1).z, rimThicknessMM);
+  // The round-over is a quarter circle.
+  for (const l of lip.filter((q) => q.z > rimThicknessMM - lipRadiusMM)) {
+    const dz = l.z - (rimThicknessMM - lipRadiusMM), dx = lipRadiusMM - l.inset;
+    assert.ok(Math.abs(Math.hypot(dz, dx) - lipRadiusMM) < 1e-9);
+  }
+});
+
+// ---- side text
+
+test('text shapes: real letter outlines with holes', () => {
+  const t = textShapes(FONT, 'Dispose of after use', 4);
+  assert.ok(t.shapes.length >= 17, `${t.shapes.length} shapes`);
+  assert.ok(t.shapes.filter((q) => q.holes.length).length >= 6, 'D, o, p, e, a... have holes');
+  assert.ok(Math.abs(t.maxV - 4) < 0.6, `cap height ~4 mm, got ${t.maxV.toFixed(2)}`);
+  assert.ok(t.width > 45 && t.width < 65, `width ${t.width.toFixed(1)} mm`);
+});
+
+test('side text: raised on the outside of the blade, readable as printed', () => {
+  const res = makeCutter(SHAPES.circle, { font: FONT });
+  assert.ok(res.validation.ok, res.validation.errors.join('; '));
+  assert.deepEqual(res.label, { placed: true, capHeightMM: 4, text: 'Dispose of after use' });
+  const plain = makeCutter(SHAPES.circle, {});
+  const P = res.mesh.positions, start = plain.mesh.positions.length / 3;
+  const { heightMM, bevelMM, rimThicknessMM, baseMM } = res.mesh.profile;
+  for (let v = start; v < P.length / 3; v++) {
+    const z = P[v * 3 + 2], d = distToPoly([P[v * 3], P[v * 3 + 1]], res.mesh.inner);
+    assert.ok(z >= rimThicknessMM + 0.79 && z <= heightMM - bevelMM - 0.99, `z ${z}`);
+    assert.ok(d > baseMM - 0.45 && d < baseMM + 0.65, `distance from the cut edge ${d.toFixed(2)}`);
+  }
+  // Reading order follows the CCW tangent (left to right seen from outside, blade up).
+  const label = labelShells(FONT, 'Dispose of after use', res.mesh.base, { zMin: 3.8, zMax: 14.5 });
+  const centroid = (from, to) => { let x = 0, y = 0; for (let v = from; v < to; v++) { x += label.positions[v * 3]; y += label.positions[v * 3 + 1]; } return [x / (to - from), y / (to - from)]; };
+  const ss = label.shapeStarts, nv = label.positions.length / 3;
+  const a0 = Math.atan2(...centroid(ss[0], ss[1]).reverse()), a1 = Math.atan2(...centroid(ss.at(-1), nv).reverse());
+  let da = a1 - a0; while (da > Math.PI) da -= 2 * Math.PI; while (da < -Math.PI) da += 2 * Math.PI;
+  assert.ok(da > 0, 'first letter comes before the last going counter-clockwise');
+});
+
+test('side text on curved and tricky shapes: placed or skipped, never a broken mesh', () => {
+  for (const name of ['heart', 'figure', 'square']) {
+    const res = makeCutter(SHAPES[name], { font: FONT });
+    assert.ok(res.validation.ok, `${name}: ${res.validation.errors.join('; ')}`);
+    assert.ok(res.label.placed || res.label.reason, name);
+  }
+  assert.ok(makeCutter(SHAPES.heart, { font: FONT }).label.placed, 'the heart has room for it');
+  const tiny = makeCutter(SHAPES.star, { font: FONT, sizeMM: 40 });
+  assert.ok(tiny.validation.ok);
+  assert.equal(tiny.label.placed, false);
+  assert.match(tiny.label.reason, /long enough/);
+  assert.equal(makeCutter(SHAPES.circle, { font: FONT, labelText: '   ' }).label, null, 'blank text: no label');
 });

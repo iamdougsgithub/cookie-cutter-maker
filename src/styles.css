@@ -117,6 +117,7 @@ h2 { font-size: 1.1rem; display: flex; align-items: center; gap: 8px; }
 .label-row output { margin-left: auto; font-variant-numeric: tabular-nums; color: var(--ink-2); font-size: .9rem; }
 .note { margin: 0; font-size: .82rem; color: var(--ink-2); }
 .note:empty { display: none; }
+.note.warn-note { color: var(--bad); }
 .check { display: inline-flex; align-items: center; gap: 6px; font-size: .9rem; cursor: pointer; }
 .check input { accent-color: var(--accent); width: 16px; height: 16px; }
 input[type="range"] { width: 100%; accent-color: var(--accent); min-height: 28px; }
@@ -168,6 +169,8 @@ input[type="range"]:disabled { opacity: .4; }
 
 .download { margin-top: 16px; display: grid; gap: 6px; }
 .dl-row { display: flex; gap: 8px; }
+.text-input { width: 100%; border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; background: var(--card); outline: none; }
+.text-input:focus { border-color: var(--accent); }
 .dl-row input { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 999px; padding: 9px 16px; background: var(--card); outline: none; }
 .dl-row input:focus { border-color: var(--accent); }
 .filename { margin: 0; font-size: .8rem; color: var(--ink-2); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; }

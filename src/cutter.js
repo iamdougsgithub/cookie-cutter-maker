@@ -8,9 +8,10 @@
 //   z = H          ┌┐ cutting edge (tipMM wide, exact offset, so sharp in tight corners too)
 //                  │ \  bevel (~26° with the defaults) over the top bevelMM
 //   z = H - bevel  │  │ shoulder: full blade thickness (baseMM)
-//                  │  │ inside face: vertical, exactly the outline
-//   z = rimT    ┌──┘  └──────┐
-//   z = 0       └────────────┘ rim (rimWidthMM beyond the blade)
+//                  │  │ inside face: vertical, exactly the outline; optional raised side
+//                  │  │ text on the outside face
+//   z = lipT       │  └──────╮  lip: rimWidthMM beyond the blade, rounded top edge
+//   z = 0          └─────────╯  (lipRadiusMM) and a small bed chamfer (lipChamferMM)
 //
 // With bevelMM = 0 the outside face is instead a plain taper from baseMM to tipMM.
 
@@ -18,14 +19,18 @@ import {
   DEFAULTS, ensureCCW, inwardNormals, offsetPolygon, perimeter, processOutline,
   resampleClosed, triangulateRegion, validateMesh, meshToSTL, bbox,
 } from './geometry.js';
+import { labelShells } from './text.js';
 
 export const CUTTER_DEFAULTS = Object.freeze({
-  heightMM: 18,          // overall height, rim included
+  heightMM: 18,          // overall height, lip included
   tipMM: 0.4,            // cutting edge: one perimeter with a 0.4 mm nozzle
   bevelMM: 2.5,          // height of the sharpening bevel at the top of the blade
   baseMM: 1.6,           // blade thickness below the bevel
-  rimWidthMM: 4,         // rim beyond the blade base
-  rimThicknessMM: 2,
+  rimWidthMM: 6,         // lip beyond the blade
+  rimThicknessMM: 3,     // lip thickness
+  lipRadiusMM: 1.5,      // round-over on the lip's outer top edge (the edge you hold)
+  lipChamferMM: 0.6,     // 45° chamfer on the lip's bed edge (prints cleanly, no elephant's foot)
+  labelText: 'Dispose of after use',
 });
 
 const spacedRing = (pts, spacing = 0.4) => ensureCCW(resampleClosed(pts, Math.max(360, Math.round(perimeter(pts) / spacing))));
@@ -38,14 +43,15 @@ function outward(pts, d) {
 
 /**
  * Build the cutter mesh from a cookie outline (mm, CCW, as seen on the cookie's top).
- * Returns { positions, indices, rings, inner, tip, shoulder, base, rim, profile }.
+ * opts.font (an opentype.js Font) + opts.labelText add raised text on the blade's outside.
+ * Returns { positions, indices, rings, inner, tip, shoulder, base, rim, profile, label, flatBands }.
  */
 export function buildCutterMesh(outline, opts = {}) {
   const o = { ...CUTTER_DEFAULTS, ...opts };
   const H = o.heightMM, T = o.rimThicknessMM;
   if (!(o.tipMM > 0) || o.baseMM < o.tipMM) throw new Error('Blade must be at least as thick at the base as at the tip.');
   if (H < T + 3) throw new Error(`Height must be at least ${(T + 3).toFixed(0)} mm.`);
-  if (!(o.rimWidthMM >= 1)) throw new Error('Rim must be at least 1 mm wide.');
+  if (!(o.rimWidthMM >= 1)) throw new Error('Lip must be at least 1 mm wide.');
 
   const inner = ensureCCW(outline.map(([x, y]) => [-x, y])); // mirrored for print orientation
   const bevel = Math.max(0, Math.min(o.bevelMM ?? 0, H - T - 1));
@@ -53,11 +59,10 @@ export function buildCutterMesh(outline, opts = {}) {
   // Every outside ring is an exact Clipper offset of the outline (round joins; walls that
   // meet across a narrow gap merge), so the cutting edge is tipMM wide everywhere —
   // including tight inside corners. Rings with different vertex counts are joined by
-  // stitched strips (see stitch below).
+  // fold-checked strips (band, below).
   const tip = spacedRing(outward(inner, o.tipMM));
   const base = spacedRing(outward(inner, o.baseMM));
   const shoulder = bevel > 0 ? base : null; // full thickness right up to the bevel
-  const rim = spacedRing(outward(base, o.rimWidthMM));
   // The bevel (or plain taper) is a surface whose height drops linearly with distance
   // from the outline: exact offset rings every ~0.2 mm between the edge and the wall.
   const zTop = H, zLow = shoulder ? H - bevel : T;
@@ -69,10 +74,37 @@ export function buildCutterMesh(outline, opts = {}) {
   }
   levels.push({ ring: base, z: zLow });
 
+  // Lip profile, bottom to top: (z, inset from the lip's outer edge). The outer edge is an
+  // offset of the blade base, so its outside curves are at least rimWidthMM in radius; the
+  // insets (≤ lipRadiusMM) are plain per-point shifts of it, so every lip ring has the same
+  // vertices and neighbouring rings join with simple quads.
+  const chamfer = Math.max(0, Math.min(o.lipChamferMM, T / 3, o.rimWidthMM / 3));
+  const lipR = Math.max(0, Math.min(o.lipRadiusMM, T - chamfer - 0.2, o.rimWidthMM - 1));
+  const lipProfile = [];
+  if (chamfer > 0) lipProfile.push({ z: 0, inset: chamfer });
+  lipProfile.push({ z: chamfer, inset: 0 });
+  if (lipR > 0) {
+    const segs = 8;
+    lipProfile.push({ z: T - lipR, inset: 0 });
+    for (let k = 1; k <= segs; k++) {
+      const th = (k / segs) * (Math.PI / 2);
+      lipProfile.push({ z: T - lipR + lipR * Math.sin(th), inset: lipR * (1 - Math.cos(th)) });
+    }
+    lipProfile[lipProfile.length - 1].z = T;
+  } else {
+    lipProfile.push({ z: T, inset: 0 });
+  }
+  const rim = spacedRing(outward(base, o.rimWidthMM)); // outermost lip ring (footprint)
+  const rimIn = inwardNormals(rim);
+  const lip = lipProfile.map((p, k) => ({
+    ...p, name: `lip${k}`,
+    ring: p.inset ? rim.map(([x, y], i) => [x + rimIn[i][0] * p.inset, y + rimIn[i][1] * p.inset]) : rim,
+  }));
+
   // Vertex layout: each ring placed at its z.
   const layout = [
     ['inner0', inner, 0], ['inner1', inner, H],
-    ['rim0', rim, 0], ['rim1', rim, T],
+    ...lip.map((l) => [l.name, l.ring, l.z]),
     ['base', base, T], ...(shoulder ? [['shoulder', shoulder, H - bevel]] : []),
     ...levels.slice(1, -1).map((l, k) => [`level${k + 1}`, l.ring, l.z]),
     ['tip', tip, H],
@@ -80,12 +112,11 @@ export function buildCutterMesh(outline, opts = {}) {
   const at = {};
   let count = 0;
   for (const [name, ring] of layout) { at[name] = count; count += ring.length; }
-  const positions = new Float64Array(count * 3);
-  for (const [name, ring, z] of layout) {
-    ring.forEach(([x, y], i) => { const j = (at[name] + i) * 3; positions[j] = x; positions[j + 1] = y; positions[j + 2] = z; });
-  }
+  const positions = [];
+  for (const [, ring, z] of layout) for (const [x, y] of ring) positions.push(x, y, z);
 
   const tris = [];
+  const flatBands = [];
   // Side wall between two corresponding rings; flip = face toward the ring's inside.
   const wall = (lo, hi, n, flip) => {
     for (let i = 0; i < n; i++) {
@@ -94,9 +125,6 @@ export function buildCutterMesh(outline, opts = {}) {
       if (flip) tris.push(a, c, b, a, d, c); else tris.push(a, b, c, a, c, d);
     }
   };
-  wall(at.inner0, at.inner1, inner.length, true); // inside face looks into the cookie
-  wall(at.rim0, at.rim1, rim.length, false);
-  if (shoulder) wall(at.base, at.shoulder, base.length, false); // vertical, full thickness
   // Flat annular faces: region between an outer ring and a hole ring.
   const face = (outerName, outerRing, holeName, holeRing, up) => {
     const local = triangulateRegion(outerRing, [holeRing]);
@@ -105,34 +133,57 @@ export function buildCutterMesh(outline, opts = {}) {
       if (up) tris.push(map(a), map(b), map(c)); else tris.push(map(a), map(c), map(b));
     }
   };
-  face('rim0', rim, 'inner0', inner, false); // underside, on the bed
-  face('rim1', rim, 'base', base, true);     // top of the rim
-  face('tip', tip, 'inner1', inner, true);   // cutting edge
-  // Bevel: join each pair of neighbouring offset rings (0.2 mm apart) with a zipper strip,
-  // every triangle touching both rings, so the slope is even. Where a band changes shape
-  // too much for that (e.g. walls merging inside a hooked hand) and the strip would fold,
-  // that band is triangulated flat instead (earcut) and lifted: a height map, which
-  // can't fold.
-  const levelName = (k) => (k === 0 ? 'tip' : k === levels.length - 1 ? (shoulder ? 'shoulder' : 'base') : `level${k}`);
-  const flatBands = [];
-  for (let k = 0; k + 1 < levels.length; k++) {
-    const loName = levelName(k + 1), hiName = levelName(k);
-    const band = zipper(levels[k + 1].ring, levels[k].ring) ?? nearestZipper(levels[k + 1].ring, levels[k].ring);
-    if (band) {
-      const L = (i) => at[loName] + i, U = (j) => at[hiName] + j;
-      for (const [a, b, c] of band) tris.push(a.lo ? L(a.i) : U(a.i), b.lo ? L(b.i) : U(b.i), c.lo ? L(c.i) : U(c.i));
+  // Sloped band between an outer and an inner ring (in plan view) at different heights:
+  // a zipper strip where every triangle touches both rings, so the slope is even; if that
+  // would fold, nearest-point pairing; failing that, a flat triangulation with diagonals
+  // flipped to span the rings. facesUp: the inner ring is the higher one.
+  const band = (outerName, outer, innerName, innerRing, facesUp, tag) => {
+    let local;
+    const strip = zipper(outer, innerRing) ?? nearestZipper(outer, innerRing);
+    if (strip) {
+      local = strip.map((t) => t.map((r) => (r.lo ? at[outerName] + r.i : at[innerName] + r.i)));
     } else {
-      flatBands.push(k);
-      const lo = levels[k + 1].ring, hi = levels[k].ring;
-      const map = (v) => (v < lo.length ? at[loName] + v : at[hiName] + v - lo.length);
-      for (const [a, b, c] of spanningTriangulation(lo, hi)) tris.push(map(a), map(b), map(c));
+      flatBands.push(tag);
+      local = spanningTriangulation(outer, innerRing)
+        .map((t) => t.map((v) => (v < outer.length ? at[outerName] + v : at[innerName] + v - outer.length)));
+    }
+    for (const [a, b, c] of local) if (facesUp) tris.push(a, b, c); else tris.push(a, c, b);
+  };
+
+  wall(at.inner0, at.inner1, inner.length, true); // inside face looks into the cookie
+  if (shoulder) wall(at.base, at.shoulder, base.length, false); // vertical, full thickness
+  face(lip[0].name, lip[0].ring, 'inner0', inner, false);              // underside, on the bed
+  face(lip.at(-1).name, lip.at(-1).ring, 'base', base, true);          // top of the lip
+  face('tip', tip, 'inner1', inner, true);                             // cutting edge
+  // Lip: matching rings, so plain quads; they face out-and-down on the chamfer and
+  // out-and-up on the round-over automatically.
+  for (let k = 0; k + 1 < lip.length; k++) wall(at[lip[k].name], at[lip[k + 1].name], rim.length, false);
+  const levelName = (k) => (k === 0 ? 'tip' : k === levels.length - 1 ? (shoulder ? 'shoulder' : 'base') : `level${k}`);
+  for (let k = 0; k + 1 < levels.length; k++) band(levelName(k + 1), levels[k + 1].ring, levelName(k), levels[k].ring, true, k);
+
+  // Raised side text: separate closed solids, sunk slightly into the outside face of the
+  // blade between the lip and the bevel. Slicers merge overlapping solids when printing.
+  let label = null;
+  if (o.font && o.labelText && o.labelText.trim()) {
+    label = labelShells(o.font, o.labelText.trim(), base, {
+      zMin: T + 0.8, zMax: (shoulder ? H - bevel : H) - 1.0,
+    });
+    if (label.positions) {
+      const off = positions.length / 3;
+      positions.push(...label.positions);
+      for (const v of label.indices) tris.push(v + off);
     }
   }
 
-  const profile = { tipMM: o.tipMM, shoulderMM: shoulder ? o.baseMM : null, baseMM: o.baseMM, bevelMM: bevel, heightMM: H, rimThicknessMM: T };
+  const profile = {
+    tipMM: o.tipMM, shoulderMM: shoulder ? o.baseMM : null, baseMM: o.baseMM, bevelMM: bevel, heightMM: H,
+    rimThicknessMM: T, rimWidthMM: o.rimWidthMM, lipRadiusMM: lipR, lipChamferMM: chamfer,
+  };
   return {
-    positions, indices: Uint32Array.from(tris), rings: [inner, tip, ...(shoulder ? [shoulder] : []), base, rim],
-    inner, tip, shoulder, base, rim, profile, flatBands,
+    positions: Float64Array.from(positions), indices: Uint32Array.from(tris),
+    rings: [inner, tip, ...(shoulder ? [shoulder] : []), base, ...lip.map((l) => l.ring).filter((r, i, a) => a.indexOf(r) === i)],
+    inner, tip, shoulder, base, rim, lip, profile, flatBands,
+    label: label && (label.positions ? { placed: true, capHeightMM: label.capHeightMM, text: o.labelText.trim() } : { placed: false, reason: label.reason }),
   };
 }
 
@@ -249,5 +300,5 @@ export function makeCutter(pixelPts, opts = {}) {
     validation.errors.push(`Cutting edge is ${Math.max(cut.width, cut.height).toFixed(2)} mm, expected ${o.sizeMM.toFixed(2)} mm.`);
     validation.ok = false;
   }
-  return { ...res, mesh, validation, cuttingSize: [cut.width, cut.height], stl: () => meshToSTL(mesh, 'Cookie Cutter and Practice Blank Maker: cutter') };
+  return { ...res, mesh, validation, cuttingSize: [cut.width, cut.height], label: mesh.label, stl: () => meshToSTL(mesh, 'Cookie Cutter and Practice Blank Maker: cutter') };
 }
