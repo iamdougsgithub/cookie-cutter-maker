@@ -140,6 +140,20 @@ const PHOTO_CARD = `
       </div>
 
       <div class="field" data-auto-only>
+        <span class="label">Select by color</span>
+        <div class="pick-row">
+          <button class="btn small" id="pickBtn" type="button">Pick a color from the photo</button>
+          <span class="swatch" id="pickSwatch" hidden></span>
+          <button class="link" id="pickClear" type="button" hidden>Clear</button>
+        </div>
+        <div id="pickTolRow" hidden>
+          <div class="label-row"><label class="label" for="pickTol">Color tolerance</label><output id="pickTolOut"></output></div>
+          <input type="range" id="pickTol" min="4" max="80" step="1" value="25">
+        </div>
+        <p class="note" id="pickNote">If the outline isn't finding the right thing, tap <b>Pick a color</b>, then tap the cutter (or the ink) in the photo. Everything that color is selected.</p>
+      </div>
+
+      <div class="field" data-auto-only id="thresholdField">
         <div class="label-row"><label class="label" for="threshold">Threshold</label>
           <label class="check"><input type="checkbox" id="thresholdAuto" checked> Auto</label>
           <output id="thresholdOut"></output></div>

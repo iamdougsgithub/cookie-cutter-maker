@@ -97,10 +97,11 @@ export function toWorkingCanvas(img) {
 
 /**
  * Find cookie-edge candidates in a working canvas.
- * opts: { mode: 'auto'|'cutter'|'drawing', threshold: null (Otsu) | 0..255 }
+ * opts: { mode: 'auto'|'cutter'|'drawing', threshold: null (Otsu) | 0..255,
+ *         mask: optional Uint8Array w*h from a colour selection (255 = selected) }
  * Returns { candidates, thresholdUsed, channel, foregroundIsDark, detectedMode, width, height }.
  */
-export function detect(cv, canvas, { mode = 'auto', threshold = null } = {}) {
+export function detect(cv, canvas, { mode = 'auto', threshold = null, mask = null } = {}) {
   const width = canvas.width, height = canvas.height;
   const mats = [];
   const M = (m) => (mats.push(m), m);
@@ -132,8 +133,9 @@ export function detect(cv, canvas, { mode = 'auto', threshold = null } = {}) {
     const otsu = cv.threshold(blur, otsuProbe, 0, 255, cv.THRESH_BINARY | cv.THRESH_OTSU);
     const foregroundIsDark = !useColor && meanBorder(blur, width, height) > otsu;
     const t = threshold == null ? otsu : threshold;
-    const raw = M(new cv.Mat());
-    cv.threshold(blur, raw, t, 255, foregroundIsDark ? cv.THRESH_BINARY_INV : cv.THRESH_BINARY);
+    // A colour selection (mask, 255 = picked colour) replaces the threshold altogether.
+    const raw = mask ? M(cv.matFromArray(height, width, cv.CV_8UC1, mask)) : M(new cv.Mat());
+    if (!mask) cv.threshold(blur, raw, t, 255, foregroundIsDark ? cv.THRESH_BINARY_INV : cv.THRESH_BINARY);
 
     // Seal small gaps in drawn lines, then knock out specks. If no closed ring turns up,
     // retry with stronger closing (a drawing with a gap in its line).
@@ -156,7 +158,8 @@ export function detect(cv, canvas, { mode = 'auto', threshold = null } = {}) {
 
     const detectedMode = guessMode({ candidate: candidates[0], foregroundIsDark, colored: useColor });
 
-    return { candidates, thresholdUsed: Math.round(t), otsu: Math.round(otsu), channel: useColor ? 'color' : 'brightness', foregroundIsDark, detectedMode, width, height };
+    const channel = mask ? 'picked' : useColor ? 'color' : 'brightness';
+    return { candidates, thresholdUsed: Math.round(t), otsu: Math.round(otsu), channel, foregroundIsDark, detectedMode, width, height };
   } finally {
     for (const m of mats) m.delete();
   }
@@ -167,7 +170,7 @@ export function detect(cv, canvas, { mode = 'auto', threshold = null } = {}) {
  * dots, flourishes — ignoring specks and anything touching the frame edge.
  * Returns { ink: [[[x, y], ...], ...], thresholdUsed, width, height }.
  */
-export function findInk(cv, canvas, { threshold = null } = {}) {
+export function findInk(cv, canvas, { threshold = null, mask = null } = {}) {
   const width = canvas.width, height = canvas.height;
   const mats = [];
   const M = (m) => (mats.push(m), m);
@@ -180,8 +183,8 @@ export function findInk(cv, canvas, { threshold = null } = {}) {
     const otsu = cv.threshold(gray, probe, 0, 255, cv.THRESH_BINARY | cv.THRESH_OTSU);
     const inkIsDark = meanBorder(gray, width, height) > otsu;
     const t = threshold == null ? otsu : threshold;
-    const bin = M(new cv.Mat());
-    cv.threshold(gray, bin, t, 255, inkIsDark ? cv.THRESH_BINARY_INV : cv.THRESH_BINARY);
+    const bin = mask ? M(cv.matFromArray(height, width, cv.CV_8UC1, mask)) : M(new cv.Mat());
+    if (!mask) cv.threshold(gray, bin, t, 255, inkIsDark ? cv.THRESH_BINARY_INV : cv.THRESH_BINARY);
     const k3 = M(cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(3, 3)));
     cv.morphologyEx(bin, bin, cv.MORPH_OPEN, k3);
     const contoursV = M(new cv.MatVector()), hier = M(new cv.Mat());

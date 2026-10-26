@@ -46,14 +46,23 @@ over HTTPS, which phones prefer for camera capture.
 - `src/vision.js`: OpenCV.js: threshold (brightness, or chroma for colored cutters), morphology, contours
 - `src/cutter.js`: pure: outline → cookie-cutter mesh (tapered blade + rim), validated like the blank
 - `src/text.js`: pure: font outlines → raised text solids wrapped onto the cutter's outside wall
+- `src/colorpick.js`: pure: select by colour (sampling, CIE Lab ΔE distance, colour mask)
 - `src/lettering.js`: pure: ink outlines → a "bubble" cookie outline round hand lettering
 - `src/trace.js`: pure: hand-traced points → smooth closed outline (centripetal Catmull-Rom, corner points), and a detected outline → editable points
 - `src/trace-editor.js`: the point editor on the photo (add, drag, insert, delete, corners, undo, zoom and pan)
 - `src/app-core.js`: shared page logic (photo, overlay, settings, three.js preview, download)
 - `src/app.js`, `src/cutter-app.js`: the two pages' configs (what to build, filename, extra settings)
 - `src/shared-markup.js`: help panel, photo card and outline settings, used by both pages
-- `test/geometry.test.js`, `test/cutter.test.js`, `test/trace.test.js`, `test/lettering.test.js`: unit tests (node:test)
+- `test/*.test.js`: unit tests (node:test) for the geometry, cutter, tracing, lettering and colour modules
 - `tools/make-test-images.mjs`: regenerates `samples/*.png`
+
+## Select by colour
+
+**Pick a color from the photo**, then tap the cutter, the ink or the drawn line. Every pixel
+within the **Color tolerance** of that colour is selected, measured as CIE Lab ΔE, which
+tracks how different colours look. The photo is lightly blurred first so grain doesn't
+speckle the result. This replaces the brightness threshold, and works in every mode,
+including Lettering. **Clear** returns to automatic detection.
 
 ## Lettering cookies
 

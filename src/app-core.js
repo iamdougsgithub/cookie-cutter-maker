@@ -7,6 +7,7 @@ import { curvePoints, nodesFromContour } from './trace.js';
 import { createTraceEditor } from './trace-editor.js';
 import { loadOpenCV, toWorkingCanvas, detect, findInk } from './vision.js';
 import { letteringOutline } from './lettering.js';
+import { colorMask, sampleColor, toHex } from './colorpick.js';
 import { renderShared } from './shared-markup.js';
 
 /**
@@ -41,6 +42,8 @@ export function startApp(product) {
     loadProblem: $('loadProblem'), loadProblemText: $('loadProblemText'), loadProblemTrace: $('loadProblemTrace'),
     modeNote: $('modeNote'), edgeField: $('edgeField'),
     borderField: $('borderField'), border: $('border'), borderOut: $('borderOut'),
+    pickBtn: $('pickBtn'), pickSwatch: $('pickSwatch'), pickClear: $('pickClear'), pickTolRow: $('pickTolRow'),
+    pickTol: $('pickTol'), pickTolOut: $('pickTolOut'), pickNote: $('pickNote'), thresholdField: $('thresholdField'),
     threshold: $('threshold'), thresholdAuto: $('thresholdAuto'), thresholdOut: $('thresholdOut'),
     smooth: $('smooth'), smoothOut: $('smoothOut'), notches: $('notches'), notchesOut: $('notchesOut'),
     size: $('size'), mirror: $('mirror'),
@@ -63,6 +66,7 @@ export function startApp(product) {
     settings: {
       mode: 'auto', edge: 'center', threshold: null, smoothness: DEFAULTS.smoothness,
       notchWidthMM: DEFAULTS.notchWidthMM, sizeMM: DEFAULTS.sizeMM, borderPct: 6,
+      pickRGB: null, pickTol: 25, // select by colour: the picked colour, and how close counts
       units: 'in', mirror: false, rotationDeg: 0,
       ...product.defaults,
     },
@@ -267,6 +271,7 @@ export function startApp(product) {
       state.settings.rotationDeg = 0;
       store.set(STORE.photo, state.work.toDataURL('image/jpeg', 0.9));
       state.trace = { source: 'auto', nodes: [], closed: false }; // a new photo needs a new trace
+      state.settings.pickRGB = null; state.picking = false; // ...and a new colour pick
       saveTrace();
     }
     if (editor.editing) editor.stop();
@@ -296,23 +301,25 @@ export function startApp(product) {
       try { state.cv = await loadOpenCV(); } catch (e) { cvFailed(e); rebuild(); return; }
     }
     const s = state.settings;
+    const mask = s.pickRGB ? colorMask(workPixels(), s.pickRGB, s.pickTol) : null;
+    updatePickUI();
     if (lettering()) {
       // Lettering: find all the ink; the outline round it is worked out in rebuild, so the
       // Border slider can change it without looking at the photo again.
-      const found = findInk(state.cv, state.work, { threshold: s.threshold });
+      const found = findInk(state.cv, state.work, { threshold: s.threshold, mask });
       state.det = { ...found, lettering: true, candidates: [], detectedMode: 'lettering', channel: 'brightness' };
       state.sel = 0;
       const n = found.ink.length;
-      setStatus(n ? `Found ${n} piece${n > 1 ? 's' : ''} of lettering` : 'No lettering found', !n);
+      setStatus(n ? `Found ${n} piece${n > 1 ? 's' : ''} of lettering${mask ? ' (by picked color)' : ''}` : 'No lettering found', !n);
       if (s.threshold == null) els.threshold.value = found.thresholdUsed;
       els.thresholdOut.textContent = found.thresholdUsed;
       rebuild();
       return;
     }
-    state.det = detect(state.cv, state.work, { mode: s.mode === 'auto' ? 'auto' : s.mode, threshold: s.threshold });
+    state.det = detect(state.cv, state.work, { mode: s.mode === 'auto' ? 'auto' : s.mode, threshold: s.threshold, mask });
     state.sel = Math.min(s.sel ?? 0, Math.max(0, state.det.candidates.length - 1));
     const n = state.det.candidates.length;
-    const by = state.det.channel === 'color' ? ' (by color)' : '';
+    const by = { color: ' (by color)', picked: ' (by picked color)' }[state.det.channel] ?? '';
     setStatus(n ? `Found ${n} shape${n > 1 ? 's' : ''}${by}` : 'No closed shape found', !n);
     if (s.threshold == null) els.threshold.value = state.det.thresholdUsed;
     els.thresholdOut.textContent = state.det.thresholdUsed;
@@ -393,6 +400,29 @@ export function startApp(product) {
     return effectiveMode() === 'drawing' && state.settings.edge === 'center' ? centerlineOf(cand) : cand.points;
   }
 
+  // ------------------------------------------------------------------ select by colour
+
+  const workPixels = () => state.work.getContext('2d').getImageData(0, 0, state.work.width, state.work.height);
+
+  function updatePickUI() {
+    const s = state.settings, picked = !!s.pickRGB;
+    els.pickBtn.classList.toggle('active', !!state.picking);
+    els.pickBtn.textContent = state.picking ? 'Tap the photo…' : picked ? 'Pick a different color' : 'Pick a color from the photo';
+    els.overlay.classList.toggle('picking', !!state.picking);
+    els.pickSwatch.hidden = !picked;
+    if (picked) { els.pickSwatch.style.background = toHex(s.pickRGB); els.pickSwatch.title = toHex(s.pickRGB); }
+    els.pickClear.hidden = !picked;
+    els.pickTolRow.hidden = !picked;
+    els.pickTolOut.textContent = s.pickTol;
+    // The picked colour replaces the brightness threshold.
+    if (state.trace.source !== 'trace') els.thresholdField.hidden = picked;
+    els.pickNote.innerHTML = state.picking
+      ? '<b>Tap the photo</b> on the color you want: the cutter, the ink or the drawn line.'
+      : picked
+        ? 'Everything close to this color is selected. Raise the tolerance if parts are missing, lower it if too much is taken.'
+        : 'If the outline isn’t finding the right thing, tap <b>Pick a color</b>, then tap the cutter (or the ink) in the photo. Everything that color is selected.';
+  }
+
   // ------------------------------------------------------------------ hand tracing
 
   const editor = createTraceEditor(els.overlay, {
@@ -434,6 +464,7 @@ export function startApp(product) {
     els.traceUsing.hidden = !tracing || editing;
     els.overlay.classList.toggle('tracing', editing);
     document.querySelectorAll('[data-auto-only]').forEach((n) => (n.hidden = tracing));
+    updatePickUI();
     if (!editing) return;
     const n = state.trace.nodes.length;
     els.traceHint.innerHTML = !state.trace.closed
@@ -569,6 +600,7 @@ export function startApp(product) {
     for (const inp of textInputs) inp.value = s[inp.dataset.text] ?? '';
     els.mirror.checked = s.mirror;
     els.border.value = s.borderPct;
+    els.pickTol.value = s.pickTol;
     els.smooth.value = s.smoothness;
     document.querySelectorAll('input[name="mode"]').forEach((r) => (r.checked = r.value === s.mode));
     document.querySelectorAll('input[name="edge"]').forEach((r) => (r.checked = r.value === s.edge));
@@ -605,6 +637,14 @@ export function startApp(product) {
     els.notches.addEventListener('input', () => { s.notchWidthMM = Number(els.notches.value); syncControls(); rebuildSoon(); });
     els.mirror.addEventListener('change', () => { s.mirror = els.mirror.checked; rebuild(); });
     els.border.addEventListener('input', () => { s.borderPct = Number(els.border.value); rebuildSoon(); });
+    els.pickBtn.addEventListener('click', () => {
+      if (!state.work) return;
+      state.picking = !state.picking;
+      updatePickUI();
+      if (state.picking) els.drop.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
+    els.pickClear.addEventListener('click', () => { s.pickRGB = null; state.picking = false; updatePickUI(); detectSoon(); });
+    els.pickTol.addEventListener('input', () => { s.pickTol = Number(els.pickTol.value); els.pickTolOut.textContent = s.pickTol; detectSoon(); });
 
     els.size.addEventListener('input', () => { s.sizeMM = readNumber(els.size, 25, 254, s.sizeMM); rebuildSoon(); });
     els.size.addEventListener('change', syncControls);
@@ -661,10 +701,18 @@ export function startApp(product) {
     // Click to choose among candidates.
     els.overlay.addEventListener('click', (e) => {
       if (state.trace.source === 'trace') return;
-      if (!state.det || state.det.candidates.length < 2) return;
       const r = els.overlay.getBoundingClientRect();
       const x = ((e.clientX - r.left) / r.width) * els.overlay.width;
       const y = ((e.clientY - r.top) / r.height) * els.overlay.height;
+      if (state.picking && state.work) {
+        // Sample the photo itself (not the overlay with its outline drawn on).
+        s.pickRGB = sampleColor(workPixels(), x, y, 3);
+        state.picking = false;
+        updatePickUI();
+        detectSoon();
+        return;
+      }
+      if (!state.det || state.det.candidates.length < 2) return;
       const i = candidateAt(state.det.candidates, [x, y]);
       if (i >= 0 && i !== state.sel) { state.sel = i; rebuild(); }
     });
