@@ -94,7 +94,9 @@ h2 { font-size: 1.1rem; display: flex; align-items: center; gap: 8px; }
 .drop canvas.pickable { cursor: pointer; }
 .drop canvas.tracing { cursor: crosshair; touch-action: none; }
 .trace-bar { display: grid; gap: 8px; }
-.pick-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.pick-bar { display: grid; gap: 8px; }
+.pick-row { display: flex; align-items: center; gap: 10px; }
+.pick-row input[type="range"] { flex: 1; min-width: 80px; }
 .swatch { width: 28px; height: 28px; border-radius: 50%; border: 2px solid var(--card); box-shadow: 0 0 0 1px var(--line); }
 .drop canvas.picking { cursor: copy; }
 .btn.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }

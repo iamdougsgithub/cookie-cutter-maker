@@ -209,6 +209,41 @@ export function findInk(cv, canvas, { threshold = null, mask = null } = {}) {
   }
 }
 
+/**
+ * Select by colour: the connected area of `mask` (255 = matching colour) at or nearest the
+ * tapped point, with its holes filled, as an outline in pixels — the shape becomes this.
+ * Tiny cracks are sealed and specks dropped first. Returns { points, area } or null.
+ */
+export function regionAt(cv, mask, width, height, [sx, sy]) {
+  const bin = cv.matFromArray(height, width, cv.CV_8UC1, mask);
+  const contoursV = new cv.MatVector(), hier = new cv.Mat();
+  const dim = Math.max(width, height);
+  const kClose = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(oddAtLeast3(Math.round(dim * 0.006)), oddAtLeast3(Math.round(dim * 0.006))));
+  const kOpen = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(3, 3));
+  try {
+    cv.morphologyEx(bin, bin, cv.MORPH_CLOSE, kClose);
+    cv.morphologyEx(bin, bin, cv.MORPH_OPEN, kOpen);
+    cv.findContours(bin, contoursV, hier, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_NONE); // outers only: holes filled
+    let best = null;
+    for (let i = 0; i < contoursV.size(); i++) {
+      const c = contoursV.get(i);
+      // Signed distance: positive inside. The region containing the tap wins; otherwise the
+      // one whose edge is nearest to it.
+      const dist = cv.pointPolygonTest(c, new cv.Point(sx, sy), true);
+      const area = cv.contourArea(c);
+      if (area >= 50 && (!best || dist > best.dist)) {
+        const d = c.data32S, pts = new Array(d.length / 2);
+        for (let q = 0; q < pts.length; q++) pts[q] = [d[2 * q], d[2 * q + 1]];
+        best = { points: pts, area, dist };
+      }
+      c.delete();
+    }
+    return best && { points: best.points, area: best.area };
+  } finally {
+    bin.delete(); contoursV.delete(); hier.delete(); kClose.delete(); kOpen.delete();
+  }
+}
+
 function findContoursIn(cv, bin, width, height) {
   const contoursV = new cv.MatVector();
   const hier = new cv.Mat();

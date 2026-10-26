@@ -5,7 +5,7 @@ import { DEFAULTS, MM_PER_IN, signedArea, bbox } from './geometry.js';
 import { candidateAt, centerlineOf } from './contours.js';
 import { curvePoints, nodesFromContour } from './trace.js';
 import { createTraceEditor } from './trace-editor.js';
-import { loadOpenCV, toWorkingCanvas, detect, findInk } from './vision.js';
+import { loadOpenCV, toWorkingCanvas, detect, findInk, regionAt } from './vision.js';
 import { letteringOutline } from './lettering.js';
 import { colorMask, sampleColor, toHex } from './colorpick.js';
 import { renderShared } from './shared-markup.js';
@@ -42,7 +42,7 @@ export function startApp(product) {
     loadProblem: $('loadProblem'), loadProblemText: $('loadProblemText'), loadProblemTrace: $('loadProblemTrace'),
     modeNote: $('modeNote'), edgeField: $('edgeField'),
     borderField: $('borderField'), border: $('border'), borderOut: $('borderOut'),
-    pickBtn: $('pickBtn'), pickSwatch: $('pickSwatch'), pickClear: $('pickClear'), pickTolRow: $('pickTolRow'),
+    pickBtn: $('pickBtn'), pickBar: $('pickBar'), pickSwatch: $('pickSwatch'), pickClear: $('pickClear'), pickTolRow: $('pickTolRow'),
     pickTol: $('pickTol'), pickTolOut: $('pickTolOut'), pickNote: $('pickNote'), thresholdField: $('thresholdField'),
     threshold: $('threshold'), thresholdAuto: $('thresholdAuto'), thresholdOut: $('thresholdOut'),
     smooth: $('smooth'), smoothOut: $('smoothOut'), notches: $('notches'), notchesOut: $('notchesOut'),
@@ -66,7 +66,7 @@ export function startApp(product) {
     settings: {
       mode: 'auto', edge: 'center', threshold: null, smoothness: DEFAULTS.smoothness,
       notchWidthMM: DEFAULTS.notchWidthMM, sizeMM: DEFAULTS.sizeMM, borderPct: 6,
-      pickRGB: null, pickTol: 25, // select by colour: the picked colour, and how close counts
+      pickRGB: null, pickXY: null, pickTol: 25, // select by colour: colour, where it was tapped, how close counts
       units: 'in', mirror: false, rotationDeg: 0,
       ...product.defaults,
     },
@@ -271,7 +271,7 @@ export function startApp(product) {
       state.settings.rotationDeg = 0;
       store.set(STORE.photo, state.work.toDataURL('image/jpeg', 0.9));
       state.trace = { source: 'auto', nodes: [], closed: false }; // a new photo needs a new trace
-      state.settings.pickRGB = null; state.picking = false; // ...and a new colour pick
+      state.settings.pickRGB = null; state.settings.pickXY = null; state.picking = false; // ...and a new colour pick
       saveTrace();
     }
     if (editor.editing) editor.stop();
@@ -303,11 +303,24 @@ export function startApp(product) {
     const s = state.settings;
     const mask = s.pickRGB ? colorMask(workPixels(), s.pickRGB, s.pickTol) : null;
     updatePickUI();
+    if (mask && !lettering()) {
+      // Select by colour: the area of that colour where it was tapped is the shape.
+      const { width, height } = state.work;
+      const reg = regionAt(state.cv, mask, width, height, s.pickXY || [width / 2, height / 2]);
+      state.det = {
+        candidates: reg ? [{ kind: 'outer', points: reg.points, area: reg.area, lineThickness: 0 }] : [],
+        channel: 'picked', detectedMode: 'cutter', selMask: mask, width, height, thresholdUsed: 0,
+      };
+      state.sel = 0;
+      setStatus(reg ? 'Shape selected by color' : 'Nothing that color where you tapped', !reg);
+      rebuild();
+      return;
+    }
     if (lettering()) {
       // Lettering: find all the ink; the outline round it is worked out in rebuild, so the
       // Border slider can change it without looking at the photo again.
       const found = findInk(state.cv, state.work, { threshold: s.threshold, mask });
-      state.det = { ...found, lettering: true, candidates: [], detectedMode: 'lettering', channel: 'brightness' };
+      state.det = { ...found, lettering: true, candidates: [], detectedMode: 'lettering', channel: mask ? 'picked' : 'brightness', selMask: mask };
       state.sel = 0;
       const n = found.ink.length;
       setStatus(n ? `Found ${n} piece${n > 1 ? 's' : ''} of lettering${mask ? ' (by picked color)' : ''}` : 'No lettering found', !n);
@@ -334,6 +347,7 @@ export function startApp(product) {
       ? (s.mode === 'auto' ? `Auto: this looks like a ${mode === 'drawing' ? 'hand drawing' : 'cookie cutter'}.` : '')
       : '';
     els.borderField.hidden = !lettering() || state.trace.source === 'trace';
+    if (state.det?.channel === 'picked' && !lettering()) els.modeNote.textContent = 'The cookie is the area of the picked color where you tapped.';
     if (state.det?.lettering) updateLetteringOutline();
     const multi = state.trace.source === 'auto' && !!state.det && state.det.candidates.length > 1;
     els.pickHint.hidden = !multi;
@@ -405,22 +419,22 @@ export function startApp(product) {
   const workPixels = () => state.work.getContext('2d').getImageData(0, 0, state.work.width, state.work.height);
 
   function updatePickUI() {
-    const s = state.settings, picked = !!s.pickRGB;
+    const s = state.settings, picked = !!s.pickRGB, tracing = state.trace.source === 'trace';
+    els.pickBtn.hidden = tracing;
     els.pickBtn.classList.toggle('active', !!state.picking);
-    els.pickBtn.textContent = state.picking ? 'Tap the photo…' : picked ? 'Pick a different color' : 'Pick a color from the photo';
+    els.pickBtn.textContent = state.picking ? 'Tap a color in the photo…' : picked ? 'Pick another color' : 'Select by color';
     els.overlay.classList.toggle('picking', !!state.picking);
-    els.pickSwatch.hidden = !picked;
-    if (picked) { els.pickSwatch.style.background = toHex(s.pickRGB); els.pickSwatch.title = toHex(s.pickRGB); }
-    els.pickClear.hidden = !picked;
+    els.pickBar.hidden = tracing || !(picked || state.picking);
     els.pickTolRow.hidden = !picked;
+    if (picked) { els.pickSwatch.style.background = toHex(s.pickRGB); els.pickSwatch.title = toHex(s.pickRGB); }
     els.pickTolOut.textContent = s.pickTol;
     // The picked colour replaces the brightness threshold.
-    if (state.trace.source !== 'trace') els.thresholdField.hidden = picked;
+    if (!tracing) els.thresholdField.hidden = picked;
     els.pickNote.innerHTML = state.picking
-      ? '<b>Tap the photo</b> on the color you want: the cutter, the ink or the drawn line.'
-      : picked
-        ? 'Everything close to this color is selected. Raise the tolerance if parts are missing, lower it if too much is taken.'
-        : 'If the outline isn’t finding the right thing, tap <b>Pick a color</b>, then tap the cutter (or the ink) in the photo. Everything that color is selected.';
+      ? '<b>Tap the photo</b> on the color of the shape you want.'
+      : lettering()
+        ? 'All the ink in this color is used for the lettering. Adjust the tolerance until it’s all selected.'
+        : 'The tinted area is the cookie. Raise the tolerance to take in more of the edge, lower it to take in less.';
   }
 
   // ------------------------------------------------------------------ hand tracing
@@ -495,6 +509,17 @@ export function startApp(product) {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, w, h);
     ctx.drawImage(state.work, 0, 0);
+    // Select by colour: tint what the colour selects, so the tolerance's effect is visible.
+    const selMask = state.det?.selMask;
+    if (selMask && selMask.length === w * h) {
+      const img = ctx.getImageData(0, 0, w, h), px = img.data;
+      for (let i = 0; i < selMask.length; i++) {
+        if (!selMask[i]) continue;
+        const j = i * 4;
+        px[j] = px[j] * 0.55 + 255 * 0.45; px[j + 1] = px[j + 1] * 0.55 + 45 * 0.45; px[j + 2] = px[j + 2] * 0.55 + 135 * 0.45;
+      }
+      ctx.putImageData(img, 0, 0);
+    }
     if (!state.det) return;
     const lw = Math.max(2, Math.max(w, h) / 320);
     const path = (pts) => {
@@ -643,7 +668,7 @@ export function startApp(product) {
       updatePickUI();
       if (state.picking) els.drop.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     });
-    els.pickClear.addEventListener('click', () => { s.pickRGB = null; state.picking = false; updatePickUI(); detectSoon(); });
+    els.pickClear.addEventListener('click', () => { s.pickRGB = null; s.pickXY = null; state.picking = false; updatePickUI(); detectSoon(); });
     els.pickTol.addEventListener('input', () => { s.pickTol = Number(els.pickTol.value); els.pickTolOut.textContent = s.pickTol; detectSoon(); });
 
     els.size.addEventListener('input', () => { s.sizeMM = readNumber(els.size, 25, 254, s.sizeMM); rebuildSoon(); });
@@ -707,6 +732,7 @@ export function startApp(product) {
       if (state.picking && state.work) {
         // Sample the photo itself (not the overlay with its outline drawn on).
         s.pickRGB = sampleColor(workPixels(), x, y, 3);
+        s.pickXY = [Math.round(x), Math.round(y)];
         state.picking = false;
         updatePickUI();
         detectSoon();

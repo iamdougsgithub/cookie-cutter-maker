@@ -58,11 +58,15 @@ over HTTPS, which phones prefer for camera capture.
 
 ## Select by colour
 
-**Pick a color from the photo**, then tap the cutter, the ink or the drawn line. Every pixel
-within the **Color tolerance** of that colour is selected, measured as CIE Lab ΔE, which
-tracks how different colours look. The photo is lightly blurred first so grain doesn't
-speckle the result. This replaces the brightness threshold, and works in every mode,
-including Lettering. **Clear** returns to automatic detection.
+**Select by color** (next to "Trace by hand" under the photo) works like a magic wand:
+
+- **Pick:** tap the photo on the colour of the shape you want.
+- **Shape:** the connected area of that colour around where you tapped becomes the cookie,
+  with any holes filled. It's tinted on the photo.
+- **Tolerance:** **Color tolerance** moves the edges in or out. The match is measured as
+  CIE Lab ΔE, after a light blur so grain doesn't speckle it.
+- **Lettering:** in Lettering mode, picking the ink colour selects all the ink instead.
+- **Clear** returns to automatic detection.
 
 ## Lettering cookies
 
