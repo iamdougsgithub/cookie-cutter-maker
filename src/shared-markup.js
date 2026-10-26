@@ -71,6 +71,10 @@ const PHOTO_CARD = `
       </div>
     </div>
     <div class="photo-foot">
+      <div class="load-problem" id="loadProblem" role="alert" hidden>
+        <p><b>Automatic shape finding isn’t available.</b> <span id="loadProblemText"></span></p>
+        <p>You can still <button class="link" id="loadProblemTrace" type="button">trace the shape by hand</button>.</p>
+      </div>
       <p class="hint" id="pickHint" hidden>Found more than one shape. <b>Tap the one you want.</b></p>
       <div class="photo-actions" id="photoActions" hidden>
         <label class="btn small">Replace photo<input type="file" id="fileInput2" accept="image/*" hidden></label>

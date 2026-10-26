@@ -2,30 +2,84 @@
 
 import { findCookieCandidates, guessMode } from './contours.js';
 
-const OPENCV_URL = 'https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.10.0-release.1/dist/opencv.js';
+// Same build from two CDNs: if one is blocked or down, try the other.
+const OPENCV_URLS = [
+  'https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.10.0-release.1/dist/opencv.js',
+  'https://unpkg.com/@techstark/opencv-js@4.10.0-release.1/dist/opencv.js',
+];
+const LOAD_TIMEOUT_MS = 60000;
 const MAX_DIM = 1100; // working resolution
 
 let cvPromise = null;
 
-/** Load OpenCV.js once. Resolves with the ready `cv` module. */
+/** A loading failure with a plain-language reason. kind: 'wasm' | 'download' | 'timeout'. */
+function loadError(kind, message) {
+  const e = new Error(message);
+  e.kind = kind;
+  return e;
+}
+
+/** Can this browser actually run WebAssembly? (Edge's enhanced security mode turns it off.) */
+async function webAssemblyWorks() {
+  try {
+    if (typeof WebAssembly !== 'object') return false;
+    // The smallest valid module: just the header.
+    await WebAssembly.instantiate(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function addScript(url) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = url;
+    s.async = true;
+    s.onload = resolve;
+    s.onerror = () => { s.remove(); reject(new Error(`failed to download ${url}`)); };
+    document.head.appendChild(s);
+  });
+}
+
+/**
+ * Load OpenCV.js once. Resolves with the ready `cv` module; rejects with a loadError if
+ * WebAssembly is unavailable, the download is blocked, or it takes too long.
+ */
 export function loadOpenCV() {
   if (cvPromise) return cvPromise;
   cvPromise = new Promise((resolve, reject) => {
     // The Emscripten module has a then() that resolves to the module itself, so awaiting or
     // resolving with it spins forever. Strip it once the runtime is up.
-    const done = (cv) => { try { delete cv.then; } catch {} if (typeof cv.then === 'function') cv.then = undefined; resolve(cv); };
-    const ready = async () => {
+    let settled = false;
+    const done = (cv) => {
+      if (settled) return;
+      settled = true; clearTimeout(timer);
+      try { delete cv.then; } catch {} if (typeof cv.then === 'function') cv.then = undefined;
+      resolve(cv);
+    };
+    const fail = (e) => { if (!settled) { settled = true; clearTimeout(timer); reject(e); } };
+    const timer = setTimeout(() => fail(loadError('timeout',
+      'The shape finder is taking too long to load (it’s a 10 MB download). Check your connection, then reload the page.')), LOAD_TIMEOUT_MS);
+
+    (async () => {
+      if (!(await webAssemblyWorks())) {
+        throw loadError('wasm', 'This browser has WebAssembly switched off, so the automatic shape finder can’t run. ' +
+          'In Microsoft Edge this is “Enhance your security on the web” (edge://settings/privacy): add this site as an exception, or turn it off.');
+      }
+      let lastErr = null;
+      for (const url of OPENCV_URLS) {
+        try { await addScript(url); lastErr = null; break; } catch (e) { lastErr = e; }
+      }
+      if (lastErr) {
+        throw loadError('download', 'Couldn’t download the shape finder from cdn.jsdelivr.net or unpkg.com. ' +
+          'A network filter, firewall or content blocker may be blocking it.');
+      }
       let cv = window.cv;
       if (cv instanceof Promise) cv = await cv; // some builds expose a real promise of the module
       if (cv && cv.Mat) { window.cv = cv; done(cv); return; }
       cv.onRuntimeInitialized = () => done(cv);
-    };
-    const s = document.createElement('script');
-    s.src = OPENCV_URL;
-    s.async = true;
-    s.onload = () => ready().catch(reject);
-    s.onerror = () => reject(new Error('Could not load OpenCV.js — check your connection.'));
-    document.head.appendChild(s);
+    })().catch(fail);
   });
   return cvPromise;
 }

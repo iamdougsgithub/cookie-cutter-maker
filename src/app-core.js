@@ -37,6 +37,7 @@ export function startApp(product) {
     traceUndo: $('traceUndo'), traceDelete: $('traceDelete'), traceCorner: $('traceCorner'),
     traceZoomIn: $('traceZoomIn'), traceZoomOut: $('traceZoomOut'), traceFit: $('traceFit'),
     traceClear: $('traceClear'), traceDone: $('traceDone'), traceEdit: $('traceEdit'), traceAuto: $('traceAuto'),
+    loadProblem: $('loadProblem'), loadProblemText: $('loadProblemText'), loadProblemTrace: $('loadProblemTrace'),
     modeNote: $('modeNote'), edgeField: $('edgeField'),
     threshold: $('threshold'), thresholdAuto: $('thresholdAuto'), thresholdOut: $('thresholdOut'),
     smooth: $('smooth'), smoothOut: $('smoothOut'), notches: $('notches'), notchesOut: $('notchesOut'),
@@ -196,6 +197,9 @@ export function startApp(product) {
     if (editor.editing) editor.stop();
     editor.set(state.trace.nodes, state.trace.closed);
     updateTraceUI();
+    // Show the photo now; finding the shape may take a moment (or be unavailable).
+    state.det = null;
+    drawOverlay();
     syncControls();
     await runDetect();
   }
@@ -212,8 +216,9 @@ export function startApp(product) {
   async function runDetect() {
     if (!state.work) return;
     if (!state.cv) {
+      if (state.cvError) { rebuild(); return; }
       setStatus('Loading shape finder…');
-      try { state.cv = await loadOpenCV(); } catch (e) { setStatus(e.message, true); return; }
+      try { state.cv = await loadOpenCV(); } catch (e) { cvFailed(e); rebuild(); return; }
     }
     const s = state.settings;
     state.det = detect(state.cv, state.work, { mode: s.mode === 'auto' ? 'auto' : s.mode, threshold: s.threshold });
@@ -417,6 +422,15 @@ export function startApp(product) {
     saveBlob(new Blob([b.stl()], { type: 'model/stl' }), fileName());
   }
 
+  /** The shape finder couldn't load: say why, and offer tracing by hand instead. */
+  function cvFailed(e) {
+    state.cvError = e;
+    console.error('Shape finder failed to load', e);
+    setStatus('Shape finder unavailable', true);
+    els.loadProblemText.textContent = e.message;
+    els.loadProblem.hidden = false;
+  }
+
   function showError(e) {
     console.error(e);
     setStatus(e.message || String(e), true);
@@ -540,6 +554,10 @@ export function startApp(product) {
   // ------------------------------------------------------------------ boot
 
   els.traceBtn.addEventListener('click', startTracing);
+  els.loadProblemTrace.addEventListener('click', () => {
+    if (state.work) startTracing();
+    else els.drop.scrollIntoView({ behavior: 'smooth', block: 'center' }); // choose a photo first
+  });
   els.traceEdit.addEventListener('click', startTracing);
   els.traceDone.addEventListener('click', () => stopTracing());
   els.traceAuto.addEventListener('click', () => stopTracing({ useAuto: true }));
@@ -557,7 +575,7 @@ export function startApp(product) {
   product.render?.(state.settings, null);
   loadOpenCV()
     .then((cv) => { state.cv = cv; if (!state.work) setStatus('Ready'); })
-    .catch((e) => setStatus(e.message, true));
+    .catch(cvFailed);
 
   // Pick up the photo from the other page (or a reload) in this tab.
   const savedPhoto = store.get(STORE.photo);
