@@ -102,7 +102,19 @@ export function startApp(product) {
 
   // ------------------------------------------------------------------ 3D preview
 
+  // The 3D view needs WebGL. Some browsers have it switched off (Edge without graphics
+  // acceleration, locked-down PCs); then fall back to a still preview drawn without it,
+  // so the rest of the app — photos, tracing, downloads — still works.
   const viewer = (() => {
+    try {
+      return createWebGLViewer();
+    } catch (e) {
+      console.warn('3D view unavailable, using the simple preview:', e);
+      return createFlatViewer();
+    }
+  })();
+
+  function createWebGLViewer() {
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
     renderer.shadowMap.enabled = true;
@@ -175,7 +187,67 @@ export function startApp(product) {
     renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
     resize();
     return { show, fit, camera, controls };
-  })();
+  }
+
+  /**
+   * Still preview without WebGL: the model's triangles drawn on a 2D canvas from above and in
+   * front, back faces skipped, painted far-to-near and shaded by a fixed light.
+   */
+  function createFlatViewer() {
+    const canvas = document.createElement('canvas');
+    canvas.className = 'flat-view';
+    els.viewer.appendChild(canvas);
+    els.viewer.insertAdjacentHTML('beforeend', `<p class="viewer-note"><b>Simple preview:</b> this browser has WebGL (3D graphics) switched off, so the 3D view can’t run. Downloads are unaffected. In Microsoft Edge, turn on <i>Settings → System and performance → Use graphics acceleration when available</i>, then restart Edge.</p>`);
+    els.resetView.hidden = true;
+    let current = null;
+    const elev = (35 * Math.PI) / 180, ce = Math.cos(elev), se = Math.sin(elev);
+    const light = (() => { const v = [-0.35, -0.55, 0.9], l = Math.hypot(...v); return v.map((c) => c / l); })();
+
+    function draw() {
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      const W = Math.max(1, Math.round(els.viewer.clientWidth * dpr)), H = Math.max(1, Math.round(els.viewer.clientHeight * dpr));
+      if (canvas.width !== W || canvas.height !== H) { canvas.width = W; canvas.height = H; }
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, W, H);
+      if (!current) return;
+      const P = current.mesh.positions, I = current.mesh.indices, n = P.length / 3;
+      // Screen x = model x; screen up mixes depth (y) and height (z) for a view from above-front.
+      const sx = new Float32Array(n), sy = new Float32Array(n), depth = new Float32Array(n);
+      let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+      for (let i = 0; i < n; i++) {
+        const x = P[i * 3], y = P[i * 3 + 1], z = P[i * 3 + 2];
+        sx[i] = x; sy[i] = -(y * se + z * ce); depth[i] = -y * ce + z * se;
+        x0 = Math.min(x0, sx[i]); x1 = Math.max(x1, sx[i]); y0 = Math.min(y0, sy[i]); y1 = Math.max(y1, sy[i]);
+      }
+      // Fit into the space above the note, with a margin all round.
+      const noteH = (els.viewer.querySelector('.viewer-note')?.offsetHeight || 0) * dpr;
+      const top = H * 0.07, bottom = H - noteH - H * 0.07;
+      const k = Math.min((W * 0.86) / (x1 - x0 || 1), (bottom - top) / (y1 - y0 || 1));
+      const ox = W / 2 - ((x0 + x1) / 2) * k, oy = (top + bottom) / 2 - ((y0 + y1) / 2) * k;
+      const tris = [];
+      for (let t = 0; t < I.length; t += 3) {
+        const a = I[t] * 3, b = I[t + 1] * 3, c = I[t + 2] * 3;
+        const ux = P[b] - P[a], uy = P[b + 1] - P[a + 1], uz = P[b + 2] - P[a + 2];
+        const vx = P[c] - P[a], vy = P[c + 1] - P[a + 1], vz = P[c + 2] - P[a + 2];
+        let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+        const L = Math.hypot(nx, ny, nz) || 1; nx /= L; ny /= L; nz /= L;
+        if (-ny * ce + nz * se <= 0) continue; // facing away from the viewer
+        tris.push({ t, d: depth[I[t]] + depth[I[t + 1]] + depth[I[t + 2]], shade: 0.5 + 0.5 * Math.max(0, nx * light[0] + ny * light[1] + nz * light[2]) });
+      }
+      tris.sort((p, q) => p.d - q.d);
+      ctx.lineJoin = 'round'; ctx.lineWidth = 0.8;
+      for (const { t, shade } of tris) {
+        const col = `rgb(${Math.round(243 * shade)},${Math.round(234 * shade)},${Math.round(214 * shade)})`;
+        ctx.beginPath();
+        for (let k2 = 0; k2 < 3; k2++) { const v = I[t + k2]; const X = ox + sx[v] * k, Y = oy + sy[v] * k; k2 ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); }
+        ctx.closePath();
+        ctx.fillStyle = col; ctx.strokeStyle = col; // stroke too, to hide hairline seams
+        ctx.fill(); ctx.stroke();
+      }
+    }
+    new ResizeObserver(draw).observe(els.viewer);
+    return { show: (result) => { current = result; draw(); }, fit: draw, flat: true };
+  }
 
   // ------------------------------------------------------------------ image loading
 
