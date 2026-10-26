@@ -106,7 +106,8 @@ const PHOTO_CARD = `
         <button class="link" data-sample="samples/drawn-star.png">drawn star</button> ·
         <button class="link" data-sample="samples/drawn-figure.png">drawn figure</button> ·
         <button class="link" data-sample="samples/shadow-photo.png">photo with shadow</button> ·
-        <button class="link" data-sample="samples/stamp-photo.png">stamp cutter</button>
+        <button class="link" data-sample="samples/stamp-photo.png">stamp cutter</button> ·
+        <button class="link" data-sample="samples/lettering-testing.png" data-mode="lettering">lettering</button>
       </p>
     </div>
 
@@ -119,8 +120,15 @@ const PHOTO_CARD = `
           <label><input type="radio" name="mode" value="auto" checked><span>Auto</span></label>
           <label><input type="radio" name="mode" value="cutter"><span>Cookie cutter</span></label>
           <label><input type="radio" name="mode" value="drawing"><span>Hand drawing</span></label>
+          <label><input type="radio" name="mode" value="lettering"><span>Lettering</span></label>
         </div>
         <p class="note" id="modeNote"></p>
+      </div>
+
+      <div class="field" id="borderField" hidden>
+        <div class="label-row"><label class="label" for="border">Border round the letters</label><output id="borderOut"></output></div>
+        <input type="range" id="border" min="2" max="15" step="0.5" value="6">
+        <p class="note">How far the cookie reaches beyond the lettering. More border joins the letters into a rounder, simpler shape.</p>
       </div>
 
       <div class="field" id="edgeField" hidden>

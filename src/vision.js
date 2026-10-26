@@ -162,6 +162,50 @@ export function detect(cv, canvas, { mode = 'auto', threshold = null } = {}) {
   }
 }
 
+/**
+ * All the ink in a lettering photo: outlines of every dark (or light-on-dark) blob — letters,
+ * dots, flourishes — ignoring specks and anything touching the frame edge.
+ * Returns { ink: [[[x, y], ...], ...], thresholdUsed, width, height }.
+ */
+export function findInk(cv, canvas, { threshold = null } = {}) {
+  const width = canvas.width, height = canvas.height;
+  const mats = [];
+  const M = (m) => (mats.push(m), m);
+  try {
+    const src = M(cv.imread(canvas));
+    const gray = M(new cv.Mat());
+    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+    cv.GaussianBlur(gray, gray, new cv.Size(3, 3), 0);
+    const probe = M(new cv.Mat());
+    const otsu = cv.threshold(gray, probe, 0, 255, cv.THRESH_BINARY | cv.THRESH_OTSU);
+    const inkIsDark = meanBorder(gray, width, height) > otsu;
+    const t = threshold == null ? otsu : threshold;
+    const bin = M(new cv.Mat());
+    cv.threshold(gray, bin, t, 255, inkIsDark ? cv.THRESH_BINARY_INV : cv.THRESH_BINARY);
+    const k3 = M(cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(3, 3)));
+    cv.morphologyEx(bin, bin, cv.MORPH_OPEN, k3);
+    const contoursV = M(new cv.MatVector()), hier = M(new cv.Mat());
+    cv.findContours(bin, contoursV, hier, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_NONE);
+    const blobs = [];
+    for (let i = 0; i < contoursV.size(); i++) {
+      const c = contoursV.get(i);
+      const d = c.data32S, pts = new Array(d.length / 2);
+      for (let q = 0; q < pts.length; q++) pts[q] = [d[2 * q], d[2 * q + 1]];
+      blobs.push({ pts, area: cv.contourArea(c) });
+      c.delete();
+    }
+    const total = blobs.reduce((a, b) => a + b.area, 0);
+    const edge = 2;
+    const ink = blobs
+      .filter((b) => b.area >= Math.max(20, total * 0.002)) // specks out, i-dots in
+      .filter((b) => !b.pts.some(([x, y]) => x <= edge || y <= edge || x >= width - 1 - edge || y >= height - 1 - edge))
+      .map((b) => b.pts);
+    return { ink, thresholdUsed: Math.round(t), width, height };
+  } finally {
+    for (const m of mats) m.delete();
+  }
+}
+
 function findContoursIn(cv, bin, width, height) {
   const contoursV = new cv.MatVector();
   const hier = new cv.Mat();

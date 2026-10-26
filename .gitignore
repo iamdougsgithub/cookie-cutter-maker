@@ -4,3 +4,6 @@ node_modules/
 # Local tooling
 .claude/
 .DS_Store
+
+# Local-only test images (third-party; never commit or publish)
+test/local/

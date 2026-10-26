@@ -46,13 +46,30 @@ over HTTPS, which phones prefer for camera capture.
 - `src/vision.js`: OpenCV.js: threshold (brightness, or chroma for colored cutters), morphology, contours
 - `src/cutter.js`: pure: outline → cookie-cutter mesh (tapered blade + rim), validated like the blank
 - `src/text.js`: pure: font outlines → raised text solids wrapped onto the cutter's outside wall
+- `src/lettering.js`: pure: ink outlines → a "bubble" cookie outline round hand lettering
 - `src/trace.js`: pure: hand-traced points → smooth closed outline (centripetal Catmull-Rom, corner points), and a detected outline → editable points
 - `src/trace-editor.js`: the point editor on the photo (add, drag, insert, delete, corners, undo, zoom and pan)
 - `src/app-core.js`: shared page logic (photo, overlay, settings, three.js preview, download)
 - `src/app.js`, `src/cutter-app.js`: the two pages' configs (what to build, filename, extra settings)
 - `src/shared-markup.js`: help panel, photo card and outline settings, used by both pages
-- `test/geometry.test.js`, `test/cutter.test.js`, `test/trace.test.js`: unit tests (node:test)
+- `test/geometry.test.js`, `test/cutter.test.js`, `test/trace.test.js`, `test/lettering.test.js`: unit tests (node:test)
 - `tools/make-test-images.mjs`: regenerates `samples/*.png`
+
+## Lettering cookies
+
+Choose **Lettering** under "Shape is a" and upload hand-drawn words (dark ink on light
+paper, or light on dark). The cookie becomes a soft "bubble" that follows the lettering, so
+you can pipe the words on top.
+
+1. **Find the ink:** every blob of ink is found (letters, dots, flourishes), ignoring specks
+   and anything touching the frame edge.
+2. **Grow and merge:** each blob grows outward by the **Border** (a % of the lettering's
+   longest side, shown in mm too), and the grown blobs merge with holes filled.
+3. **Bridge:** pieces that still don't touch are joined by progressively bigger closing.
+4. **Round off:** a final closing rounds the narrow dips between letters.
+
+The result goes through the same pipeline as any other outline, so Smoothness, Fill gaps,
+size, Mirror, Rotate and Trace by hand all still apply, on both the blank and the cutter.
 
 ## Tracing by hand
 

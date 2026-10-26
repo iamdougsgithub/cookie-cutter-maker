@@ -1,11 +1,12 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { toCreasedNormals } from 'three/addons/utils/BufferGeometryUtils.js';
-import { DEFAULTS, MM_PER_IN } from './geometry.js';
+import { DEFAULTS, MM_PER_IN, signedArea, bbox } from './geometry.js';
 import { candidateAt, centerlineOf } from './contours.js';
 import { curvePoints, nodesFromContour } from './trace.js';
 import { createTraceEditor } from './trace-editor.js';
-import { loadOpenCV, toWorkingCanvas, detect } from './vision.js';
+import { loadOpenCV, toWorkingCanvas, detect, findInk } from './vision.js';
+import { letteringOutline } from './lettering.js';
 import { renderShared } from './shared-markup.js';
 
 /**
@@ -39,6 +40,7 @@ export function startApp(product) {
     traceClear: $('traceClear'), traceDone: $('traceDone'), traceEdit: $('traceEdit'), traceAuto: $('traceAuto'),
     loadProblem: $('loadProblem'), loadProblemText: $('loadProblemText'), loadProblemTrace: $('loadProblemTrace'),
     modeNote: $('modeNote'), edgeField: $('edgeField'),
+    borderField: $('borderField'), border: $('border'), borderOut: $('borderOut'),
     threshold: $('threshold'), thresholdAuto: $('thresholdAuto'), thresholdOut: $('thresholdOut'),
     smooth: $('smooth'), smoothOut: $('smoothOut'), notches: $('notches'), notchesOut: $('notchesOut'),
     size: $('size'), mirror: $('mirror'),
@@ -60,7 +62,7 @@ export function startApp(product) {
     trace: { source: 'auto', nodes: [], closed: false },
     settings: {
       mode: 'auto', edge: 'center', threshold: null, smoothness: DEFAULTS.smoothness,
-      notchWidthMM: DEFAULTS.notchWidthMM, sizeMM: DEFAULTS.sizeMM,
+      notchWidthMM: DEFAULTS.notchWidthMM, sizeMM: DEFAULTS.sizeMM, borderPct: 6,
       units: 'in', mirror: false, rotationDeg: 0,
       ...product.defaults,
     },
@@ -86,6 +88,7 @@ export function startApp(product) {
   const toUnit = (mm) => (state.settings.units === 'in' ? mm / MM_PER_IN : mm);
   const fromUnit = (v) => (state.settings.units === 'in' ? v * MM_PER_IN : v);
   const effectiveMode = () => (state.settings.mode === 'auto' ? state.det?.detectedMode ?? 'cutter' : state.settings.mode);
+  const lettering = () => state.settings.mode === 'lettering';
 
   function debounce(fn, ms) {
     let t;
@@ -221,6 +224,19 @@ export function startApp(product) {
       try { state.cv = await loadOpenCV(); } catch (e) { cvFailed(e); rebuild(); return; }
     }
     const s = state.settings;
+    if (lettering()) {
+      // Lettering: find all the ink; the outline round it is worked out in rebuild, so the
+      // Border slider can change it without looking at the photo again.
+      const found = findInk(state.cv, state.work, { threshold: s.threshold });
+      state.det = { ...found, lettering: true, candidates: [], detectedMode: 'lettering', channel: 'brightness' };
+      state.sel = 0;
+      const n = found.ink.length;
+      setStatus(n ? `Found ${n} piece${n > 1 ? 's' : ''} of lettering` : 'No lettering found', !n);
+      if (s.threshold == null) els.threshold.value = found.thresholdUsed;
+      els.thresholdOut.textContent = found.thresholdUsed;
+      rebuild();
+      return;
+    }
     state.det = detect(state.cv, state.work, { mode: s.mode === 'auto' ? 'auto' : s.mode, threshold: s.threshold });
     state.sel = Math.min(s.sel ?? 0, Math.max(0, state.det.candidates.length - 1));
     const n = state.det.candidates.length;
@@ -238,6 +254,8 @@ export function startApp(product) {
     els.modeNote.textContent = state.det
       ? (s.mode === 'auto' ? `Auto: this looks like a ${mode === 'drawing' ? 'hand drawing' : 'cookie cutter'}.` : '')
       : '';
+    els.borderField.hidden = !lettering() || state.trace.source === 'trace';
+    if (state.det?.lettering) updateLetteringOutline();
     const multi = state.trace.source === 'auto' && !!state.det && state.det.candidates.length > 1;
     els.pickHint.hidden = !multi;
     els.overlay.classList.toggle('pickable', multi);
@@ -273,9 +291,30 @@ export function startApp(product) {
     els.viewerEmpty.hidden = !!state.result;
     els.viewerEmpty.textContent = state.error && state.det ? `Couldn’t build a ${product.noun} from this shape.` : `Your ${product.noun} will appear here.`;
     updateReadout();
+    if (lettering()) {
+      // Border in mm: scale the pixel border by the cookie's size over its size in the photo.
+      const px = state.result?.overlayPx && bbox(state.result.overlayPx);
+      const mm = px ? (state.det.borderPx * s.sizeMM) / Math.max(px.width, px.height) : null;
+      els.borderOut.textContent = `${fmt(s.borderPct, 1)}%${mm ? ` · about ${s.units === 'in' ? `${fmt(mm / MM_PER_IN, 2)} in` : `${fmt(mm, 0)} mm`}` : ''}`;
+      if (state.det?.lettering && state.det.joined !== false && s.mode === 'lettering') {
+        els.modeNote.textContent = 'The cookie follows the lettering, a border’s width out. Ice the words on top.';
+      }
+    }
     product.render?.(s, state.result);
   }
   const rebuildSoon = debounce(rebuild, 60);
+
+  /** Lettering: the bubble outline round the ink, cached until the ink or border changes. */
+  function updateLetteringOutline() {
+    const det = state.det, pct = state.settings.borderPct;
+    if (det.outlineFor === pct) return;
+    det.outlineFor = pct;
+    const res = letteringOutline(det.ink, { borderPct: pct });
+    det.joined = res ? res.joined : true;
+    det.borderPx = res ? res.borderPx : 0;
+    det.candidates = res ? [{ kind: 'lettering', points: res.outline, area: Math.abs(signedArea(res.outline)), lineThickness: 0 }] : [];
+    if (res && !res.joined) els.modeNote.textContent = 'Some pieces are too far apart to join into one cookie, so only the biggest is used. Try a bigger border.';
+  }
 
   /** The outline the automatic detection would use for a candidate. */
   function autoPoints(cand) {
@@ -457,6 +496,7 @@ export function startApp(product) {
     document.querySelectorAll('.unit-label').forEach((n) => (n.textContent = n.closest('.num')?.querySelector('[data-fixed-mm]') ? 'mm' : s.units));
     for (const inp of textInputs) inp.value = s[inp.dataset.text] ?? '';
     els.mirror.checked = s.mirror;
+    els.border.value = s.borderPct;
     els.smooth.value = s.smoothness;
     document.querySelectorAll('input[name="mode"]').forEach((r) => (r.checked = r.value === s.mode));
     document.querySelectorAll('input[name="edge"]').forEach((r) => (r.checked = r.value === s.edge));
@@ -492,6 +532,7 @@ export function startApp(product) {
     els.smooth.addEventListener('input', () => { s.smoothness = Number(els.smooth.value); els.smoothOut.textContent = s.smoothness; rebuildSoon(); });
     els.notches.addEventListener('input', () => { s.notchWidthMM = Number(els.notches.value); syncControls(); rebuildSoon(); });
     els.mirror.addEventListener('change', () => { s.mirror = els.mirror.checked; rebuild(); });
+    els.border.addEventListener('input', () => { s.borderPct = Number(els.border.value); rebuildSoon(); });
 
     els.size.addEventListener('input', () => { s.sizeMM = readNumber(els.size, 25, 254, s.sizeMM); rebuildSoon(); });
     els.size.addEventListener('change', syncControls);
@@ -525,7 +566,13 @@ export function startApp(product) {
     for (const id of ['fileInput', 'cameraInput', 'fileInput2', 'cameraInput2']) {
       $(id).addEventListener('change', (e) => { loadFile(e.target.files[0]); e.target.value = ''; });
     }
-    document.querySelectorAll('[data-sample]').forEach((b) => b.addEventListener('click', () => { state.settings.sel = 0; loadImageFrom(b.dataset.sample).catch(showError); }));
+    document.querySelectorAll('[data-sample]').forEach((b) => b.addEventListener('click', () => {
+      state.settings.sel = 0;
+      // A sample can pick its mode (the lettering sample needs Lettering); others use Auto.
+      state.settings.mode = b.dataset.mode || 'auto';
+      syncControls();
+      loadImageFrom(b.dataset.sample).catch(showError);
+    }));
 
     // Drag & drop, anywhere on the photo card.
     const drop = els.drop;
