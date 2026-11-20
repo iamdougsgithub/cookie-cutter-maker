@@ -55,28 +55,60 @@ export function curvePoints(nodes, { closed = true, step = 2 } = {}) {
   return { points, segStart };
 }
 
-/**
- * Editable nodes from a detected outline (photo pixels): roughly `target` points, placed
- * where the shape bends, with sharp bends marked as corners.
- */
-export function nodesFromContour(contour, { target = 28, min = 8, max = 48, cornerDeg = 55 } = {}) {
-  const dense = resampleClosed(contour, 720);
-  const L = perimeter(dense);
-  // Find a simplification tolerance that lands near the target count.
-  let lo = L * 1e-5, hi = L * 0.05, best = null;
-  for (let it = 0; it < 30; it++) {
-    const tol = Math.sqrt(lo * hi);
-    const s = simplifyClosed(dense, tol);
-    if (!best || Math.abs(s.length - target) < Math.abs(best.length - target)) best = s;
-    if (s.length > target) lo = tol; else hi = tol;
+/** Largest distance from any of `pts` to the closed polyline `curve` (grid-accelerated). */
+function maxDeviation(pts, curve) {
+  const n = curve.length;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const [x, y] of curve) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
+  const cell = Math.max(1e-6, Math.max(x1 - x0, y1 - y0) / 64);
+  const grid = new Map();
+  const key = (gx, gy) => gx * 100003 + gy;
+  for (let i = 0; i < n; i++) {
+    const [ax, ay] = curve[i], [bx, by] = curve[(i + 1) % n];
+    for (let gx = Math.floor((Math.min(ax, bx) - x0) / cell); gx <= Math.floor((Math.max(ax, bx) - x0) / cell); gx++) {
+      for (let gy = Math.floor((Math.min(ay, by) - y0) / cell); gy <= Math.floor((Math.max(ay, by) - y0) / cell); gy++) {
+        const k = key(gx, gy);
+        if (!grid.has(k)) grid.set(k, []);
+        grid.get(k).push(i);
+      }
+    }
   }
-  let pts = best;
-  if (pts.length < min) pts = resampleClosed(dense, min);
-  if (pts.length > max) pts = resampleClosed(pts, max);
-  // A node is a corner if the outline turns sharply right there (measured on the dense
-  // outline over a short span either side, so gentle curves stay smooth).
-  const span = Math.max(2, Math.round(dense.length * 0.012));
-  return pts.map(([x, y]) => {
+  let worst = 0;
+  for (const [x, y] of pts) {
+    const gx = Math.floor((x - x0) / cell), gy = Math.floor((y - y0) / cell);
+    let best = Infinity;
+    for (let ring = 0; ring < 64 && (best === Infinity || best > (ring - 1) * cell); ring++) {
+      for (let dx = -ring; dx <= ring; dx++) for (let dy = -ring; dy <= ring; dy++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== ring) continue;
+        for (const i of grid.get(key(gx + dx, gy + dy)) || []) {
+          const [ax, ay] = curve[i], [bx, by] = curve[(i + 1) % n];
+          const ex = bx - ax, ey = by - ay, L2 = ex * ex + ey * ey || 1e-12;
+          const t = Math.max(0, Math.min(1, ((x - ax) * ex + (y - ay) * ey) / L2));
+          best = Math.min(best, Math.hypot(x - ax - t * ex, y - ay - t * ey));
+        }
+      }
+    }
+    worst = Math.max(worst, best);
+  }
+  return worst;
+}
+
+/**
+ * Editable nodes from a detected outline (photo pixels), keeping its detail: points are
+ * added until the curve through them stays within maxErrorFrac of the shape's size of the
+ * outline everywhere (up to maxNodes). Smooth stretches get few points, detailed ones many;
+ * sharp bends are marked as corners.
+ */
+export function nodesFromContour(contour, { maxErrorFrac = 0.003, minNodes = 8, maxNodes = 300, cornerDeg = 55 } = {}) {
+  const dense = resampleClosed(contour, 1440);
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const [x, y] of dense) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
+  const maxErr = Math.max(x1 - x0, y1 - y0) * maxErrorFrac;
+
+  // A point is a corner if the outline turns sharply right there, measured over a short
+  // span either side so gentle curves stay smooth.
+  const span = Math.max(2, Math.round(dense.length * 0.008));
+  const toNodes = (pts) => pts.map(([x, y]) => {
     let k = 0, bestD = Infinity;
     dense.forEach((q, i) => { const d = (q[0] - x) ** 2 + (q[1] - y) ** 2; if (d < bestD) { bestD = d; k = i; } });
     const a = dense[(k - span + dense.length) % dense.length], b = dense[(k + span) % dense.length], c = dense[k];
@@ -84,6 +116,17 @@ export function nodesFromContour(contour, { target = 28, min = 8, max = 48, corn
     const turn = Math.abs(Math.atan2(v1[0] * v2[1] - v1[1] * v2[0], v1[0] * v2[0] + v1[1] * v2[1])) * 180 / Math.PI;
     return { x, y, corner: turn > cornerDeg };
   });
+
+  let tol = maxErr, nodes = null;
+  for (let it = 0; it < 14; it++) {
+    let pts = simplifyClosed(dense, tol);
+    if (pts.length < minNodes) pts = resampleClosed(dense, minNodes);
+    if (pts.length > maxNodes) pts = resampleClosed(pts, maxNodes);
+    nodes = toNodes(pts);
+    if (pts.length >= maxNodes || maxDeviation(dense, curvePoints(nodes).points) <= maxErr) break;
+    tol *= 0.6; // the curve through the points strays too far: keep more of them
+  }
+  return nodes;
 }
 
 /** Index of the node within r of p, or -1 (nearest wins). */

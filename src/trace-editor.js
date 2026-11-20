@@ -76,8 +76,11 @@ export function createTraceEditor(canvas, { getImage, onChange, onSelect }) {
       ctx.strokeStyle = '#ff1f7a'; ctx.lineWidth = 2.5 * u; ctx.stroke();
     }
     if (!editing) return;
+    // Many points (an outline from detection keeps its detail): draw them smaller so they
+    // don't hide the photo. They're just as easy to grab: hit-testing doesn't change.
+    const k = nodes.length > 60 ? 0.6 : 1;
     nodes.forEach((n, i) => {
-      const r = (i === selected ? 8 : 6) * u;
+      const r = (i === selected ? 8 : 6 * k) * u;
       ctx.beginPath();
       if (n.corner) ctx.rect(n.x - r, n.y - r, 2 * r, 2 * r); else ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
       ctx.fillStyle = i === selected ? '#ff1f7a' : '#fff';

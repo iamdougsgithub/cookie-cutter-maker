@@ -80,3 +80,34 @@ test('a traced outline builds a valid blank', () => {
   const res = makeBlank(points, {});
   assert.ok(res.validation.ok, res.validation.errors.join('; '));
 });
+
+test('editable points keep the detected outline\'s detail', async () => {
+  const { figurePoints } = await import('../tools/figure-path.js');
+  const fig = figurePoints(); // minifigure: C-shaped hands, neck and leg notches
+  const nodes = nodesFromContour(fig);
+  const { points } = curvePoints(nodes);
+  const b = bbox(fig), span = Math.max(b.width, b.height);
+  // Every point of the original outline is within 0.35% of the shape's size of the curve.
+  const worst = Math.max(...fig.map((p) => Math.min(...points.map((q, i) => {
+    const r = points[(i + 1) % points.length];
+    const dx = r[0] - q[0], dy = r[1] - q[1], L2 = dx * dx + dy * dy || 1e-12;
+    const t = Math.max(0, Math.min(1, ((p[0] - q[0]) * dx + (p[1] - q[1]) * dy) / L2));
+    return Math.hypot(p[0] - q[0] - t * dx, p[1] - q[1] - t * dy);
+  }))));
+  assert.ok(worst <= span * 0.0035, `strays ${worst.toFixed(2)} px (${(worst / span * 100).toFixed(2)}%)`);
+  assert.ok(nodes.length > 28 && nodes.length <= 300, `${nodes.length} points`);
+});
+
+test('a small notch survives the conversion to points', () => {
+  // 400 px square with a 12 px wide, 12 px deep notch in the top edge.
+  const sq = [];
+  for (let x = 100; x < 294; x += 2) sq.push([x, 100]);
+  sq.push([294, 100], [294, 112], [306, 112], [306, 100]);
+  for (let x = 308; x < 500; x += 2) sq.push([x, 100]);
+  for (let y = 100; y < 500; y += 2) sq.push([500, y]);
+  for (let x = 500; x > 100; x -= 2) sq.push([x, 500]);
+  for (let y = 500; y > 100; y -= 2) sq.push([100, y]);
+  const { points } = curvePoints(nodesFromContour(sq));
+  const deepest = Math.max(...points.filter(([x]) => x > 296 && x < 304).map(([, y]) => (y < 300 ? y : -Infinity)));
+  assert.ok(deepest > 108, `notch depth kept: reaches y = ${deepest.toFixed(1)}`);
+});
